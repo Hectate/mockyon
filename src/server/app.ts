@@ -1,7 +1,8 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import formbody from "@fastify/formbody";
+import fastifyWebsocket from "@fastify/websocket";
 import { staticPlugin } from "./plugins/static.js";
-import { websocketPlugin } from "./plugins/websocket.js";
+import { websocketOptions } from "./plugins/websocket.js";
 import { tachyonSocket } from "./ws/tachyonSocket.js";
 import { autohostSocket } from "./ws/autohostSocket.js";
 import { authRoutes } from "./routes/auth.js";
@@ -13,7 +14,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
     await app.register(formbody);
     await app.register(staticPlugin);
-    await app.register(websocketPlugin);
+    await app.register(fastifyWebsocket, websocketOptions);
     await app.register(tachyonSocket);
     await app.register(autohostSocket);
     await app.register(authRoutes);
