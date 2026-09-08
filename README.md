@@ -42,6 +42,15 @@ While all requests, responses, and events will conform to protocol, most will no
 
     By default the server listens on all interfaces (`0.0.0.0`) on port `8080`. Override with the `HOST` and `PORT` environment variables if needed.
 
+    To set the initial server-wide password, set `TACHYON_PASSWORD` before starting the server. For example, in PowerShell:
+
+    ```powershell
+    $env:TACHYON_PASSWORD = "your-password"
+    npm start
+    ```
+
+    On macOS or Linux, use `TACHYON_PASSWORD=your-password npm start`. If it is not set, Mockyon generates a random 16-character password and prints it in the server launch logs.
+
 2. Open the static pages in a browser:
     - Client login/auth: `http://<server-host>:8080/login/`
     - Admin control panel: `http://<server-host>:8080/admin/`
@@ -50,7 +59,7 @@ While all requests, responses, and events will conform to protocol, most will no
 
 4. Connect a recoil-autohost instance running on the **same local machine** to `ws://localhost:8080/autohost`. Connections from non-loopback addresses are rejected.
 
-      <!-- TODO: installation/configuration steps for the recoil-autohost itself -->
+       <!-- TODO: installation/configuration steps for the recoil-autohost itself -->
 
 ## Development
 
