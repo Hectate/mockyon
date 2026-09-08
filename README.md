@@ -17,18 +17,18 @@ While all requests, responses, and events will conform to protocol, most will no
 
 ## Scripts
 
-| Script                 | Description                                                                                                                 |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `npm run build:client` | Builds the Vue SFC pages under `src/client/` with Vite and outputs static assets to `build/client/`.                          |
-| `npm run build:server` | Compiles the TypeScript server under `src/server/` with `tsc` and outputs to `build/server/`.                                |
-| `npm run build`        | Runs `build:client` then `build:server` — a full production build.                                                          |
+| Script                 | Description                                                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `npm run build:client` | Builds the Vue SFC pages under `src/client/` with Vite and outputs static assets to `build/client/`.                           |
+| `npm run build:server` | Compiles the TypeScript server under `src/server/` with `tsc` and outputs to `build/server/`.                                  |
+| `npm run build`        | Runs `build:client` then `build:server` — a full production build.                                                             |
 | `npm start`            | Runs `build` first (via the `prestart` hook), then starts the server from `build/server/index.js`. Use after any code changes. |
-| `npm run serve`        | Starts the server from `build/server/index.js` **without** rebuilding first. Use when `build/` is already up to date.        |
-| `npm run typecheck`    | Type-checks the server (`tsc --noEmit`) and the client (`vue-tsc --noEmit`) without emitting output.                        |
-| `npm run lint`         | Runs ESLint (with caching) across TypeScript, Vue, and JSON files.                                                          |
-| `npm run format`       | Formats the repo in place with Prettier.                                                                                    |
-| `npm run format:check` | Checks formatting with Prettier without writing changes.                                                                    |
-| `npm run checks`       | Runs `typecheck`, `lint`, and `format:check` concurrently — useful before committing.                                       |
+| `npm run serve`        | Starts the server from `build/server/index.js` **without** rebuilding first. Use when `build/` is already up to date.          |
+| `npm run typecheck`    | Type-checks the server (`tsc --noEmit`) and the client (`vue-tsc --noEmit`) without emitting output.                           |
+| `npm run lint`         | Runs ESLint (with caching) across TypeScript, Vue, and JSON files.                                                             |
+| `npm run format`       | Formats the repo in place with Prettier.                                                                                       |
+| `npm run format:check` | Checks formatting with Prettier without writing changes.                                                                       |
+| `npm run checks`       | Runs `typecheck`, `lint`, and `format:check` concurrently — useful before committing.                                          |
 
 ## Usage
 
@@ -50,7 +50,7 @@ While all requests, responses, and events will conform to protocol, most will no
 
 4. Connect a recoil-autohost instance running on the **same local machine** to `ws://localhost:8080/autohost`. Connections from non-loopback addresses are rejected.
 
-     <!-- TODO: installation/configuration steps for the recoil-autohost itself -->
+      <!-- TODO: installation/configuration steps for the recoil-autohost itself -->
 
 ## Development
 
