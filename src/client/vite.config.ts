@@ -10,7 +10,7 @@ export default defineConfig({
     root: clientDir,
     plugins: [vue()],
     build: {
-        outDir: resolve(clientDir, "../public"),
+        outDir: resolve(clientDir, "../../build/client"),
         emptyOutDir: true,
         rollupOptions: {
             input: {

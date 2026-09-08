@@ -15,4 +15,11 @@ export const staticPlugin: FastifyPluginAsync = async (app) => {
         prefix: "/admin/",
         decorateReply: false,
     });
+
+    // Shared bundle output referenced by built pages via absolute "/assets/..." paths.
+    await app.register(fastifyStatic, {
+        root: path.join(config.publicDir, "assets"),
+        prefix: "/assets/",
+        decorateReply: false,
+    });
 };

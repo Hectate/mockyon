@@ -7,7 +7,7 @@ export default {
     printWidth: 200,
     overrides: [
         {
-            files: "client/**/*.vue",
+            files: "src/client/**/*.vue",
             options: {
                 printWidth: 140,
             },

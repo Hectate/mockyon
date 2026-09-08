@@ -19,11 +19,11 @@ While all requests, responses, and events will conform to protocol, most will no
 
 | Script                 | Description                                                                                                                 |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `npm run build:client` | Builds the Vue SFC pages under `client/` with Vite and outputs static assets to `public/`.                                  |
-| `npm run build:server` | Compiles the TypeScript server under `server/` with `tsc` and outputs to `dist/`.                                           |
+| `npm run build:client` | Builds the Vue SFC pages under `src/client/` with Vite and outputs static assets to `build/client/`.                          |
+| `npm run build:server` | Compiles the TypeScript server under `src/server/` with `tsc` and outputs to `build/server/`.                                |
 | `npm run build`        | Runs `build:client` then `build:server` — a full production build.                                                          |
-| `npm start`            | Runs `build` first (via the `prestart` hook), then starts the server from `dist/index.js`. Use after any code changes.      |
-| `npm run serve`        | Starts the server from `dist/index.js` **without** rebuilding first. Use when `dist/` and `public/` are already up to date. |
+| `npm start`            | Runs `build` first (via the `prestart` hook), then starts the server from `build/server/index.js`. Use after any code changes. |
+| `npm run serve`        | Starts the server from `build/server/index.js` **without** rebuilding first. Use when `build/` is already up to date.        |
 | `npm run typecheck`    | Type-checks the server (`tsc --noEmit`) and the client (`vue-tsc --noEmit`) without emitting output.                        |
 | `npm run lint`         | Runs ESLint (with caching) across TypeScript, Vue, and JSON files.                                                          |
 | `npm run format`       | Formats the repo in place with Prettier.                                                                                    |
