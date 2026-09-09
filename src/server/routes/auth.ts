@@ -29,6 +29,6 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     app.get("/api/auth/me", async (request) => {
         const match = request.headers.authorization?.match(/^Bearer\s+(.+)$/i);
         const access = match ? validateAccessToken(match[1]) : undefined;
-        return access ? { authenticated: true, username: access.username } : { authenticated: false, username: null };
+        return access?.actor === "user" ? { authenticated: true, username: access.username } : { authenticated: false, username: null };
     });
 };

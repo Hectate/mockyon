@@ -31,4 +31,8 @@ export const config = {
     publicUrl: process.env.PUBLIC_URL ?? `http://${host === "0.0.0.0" ? "localhost" : host}:${port}`,
     // build/server/config.js -> ../client
     publicDir: path.resolve(here, "../client"),
+    // build/server/config.js -> repo root -> vendor/recoil-autohost
+    vendorAutohostDir: path.resolve(here, "../../vendor/recoil-autohost"),
+    // build/server/config.js -> repo root
+    repoRoot: path.resolve(here, "../.."),
 };

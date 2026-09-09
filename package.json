@@ -14,6 +14,9 @@
     "description": "Mock Tachyon Server for limited utility",
     "type": "module",
     "main": "build/server/index.js",
+    "workspaces": [
+        "vendor/recoil-autohost"
+    ],
     "scripts": {
         "build:client": "vite build --config src/client/vite.config.ts",
         "build:server": "tsc -p src/server/tsconfig.json",

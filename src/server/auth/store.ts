@@ -15,7 +15,7 @@ export type PendingAuthRequest = {
 
 type Session = { username: string; createdAt: number };
 type AuthCode = PendingAuthRequest & { sessionId: string; expiresAt: number };
-type AccessToken = { sessionId: string; scope: string; expiresAt: number };
+type AccessToken = { scope: string; expiresAt: number } & ({ actor: "user"; sessionId: string } | { actor: "autohost"; clientId: string });
 type RefreshToken = { sessionId: string; clientId: string; scope: string };
 
 const sessions = new Map<string, Session>();
@@ -82,9 +82,16 @@ export function consumeAuthCode(code: string): AuthCode | undefined {
 export function issueTokens(sessionId: string, clientId: string, scope: string) {
     const accessToken = token();
     const refreshToken = token();
-    accessTokens.set(accessToken, { sessionId, scope, expiresAt: Date.now() + accessTtl });
+    accessTokens.set(accessToken, { actor: "user", sessionId, scope, expiresAt: Date.now() + accessTtl });
     refreshTokens.set(refreshToken, { sessionId, clientId, scope });
     return { accessToken, refreshToken, expiresIn: accessTtl / 1000, scope };
+}
+
+// Client-credentials grant for the autohost actor: no session/refresh token, just a short-lived access token.
+export function issueAutohostAccessToken(clientId: string, scope: string) {
+    const accessToken = token();
+    accessTokens.set(accessToken, { actor: "autohost", clientId, scope, expiresAt: Date.now() + accessTtl });
+    return { accessToken, expiresIn: accessTtl / 1000, scope };
 }
 
 export function rotateRefreshToken(value: string, clientId: string) {
@@ -94,14 +101,17 @@ export function rotateRefreshToken(value: string, clientId: string) {
     return issueTokens(existing.sessionId, existing.clientId, existing.scope);
 }
 
-export function validateAccessToken(value: string): (AccessToken & { username: string }) | undefined {
+export type ValidatedAccess = { scope: string } & ({ actor: "user"; username: string } | { actor: "autohost"; clientId: string });
+
+export function validateAccessToken(value: string): ValidatedAccess | undefined {
     const access = accessTokens.get(value);
     if (!access || access.expiresAt <= Date.now()) {
         accessTokens.delete(value);
         return undefined;
     }
+    if (access.actor === "autohost") return { actor: "autohost", clientId: access.clientId, scope: access.scope };
     const session = sessions.get(access.sessionId);
-    return session ? { ...access, username: session.username } : undefined;
+    return session ? { actor: "user", username: session.username, scope: access.scope } : undefined;
 }
 
 export function revokeToken(value: string): void {
@@ -110,7 +120,7 @@ export function revokeToken(value: string): void {
     accessTokens.delete(value);
     if (refresh) {
         for (const [accessToken, access] of accessTokens) {
-            if (access.sessionId === refresh.sessionId) accessTokens.delete(accessToken);
+            if (access.actor === "user" && access.sessionId === refresh.sessionId) accessTokens.delete(accessToken);
         }
     }
 }

@@ -1,33 +1,28 @@
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { WebSocket } from "ws";
+import { registerConnectedAutohost, unregisterConnectedAutohost } from "./connectedAutohosts.js";
 import { parseAutohostMessage } from "./tachyon/messages.js";
 import type { RawData } from "./tachyon/types.js";
 
-const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+// Handles the Tachyon "autohost" actor once authenticated on the shared /tachyon socket.
+export function handleAutohostConnection(app: FastifyInstance, socket: WebSocket, request: FastifyRequest, clientId: string): void {
+    app.log.info({ remoteAddress: request.raw.socket.remoteAddress, clientId }, "autohost connected");
 
-// Represents the Tachyon "autohost" actor connection from the local recoil-autohost.
-export const autohostSocket: FastifyPluginAsync = async (app) => {
-    app.get("/autohost", { websocket: true }, (socket, request) => {
-        const remoteAddress = request.socket.remoteAddress;
+    registerConnectedAutohost(clientId, socket);
+    const cleanup = () => unregisterConnectedAutohost(socket);
+    socket.on("close", cleanup);
+    socket.on("error", cleanup);
 
-        // TODO: add shared-secret/token auth once defined; loopback check is a stopgap only.
-        if (!remoteAddress || !LOOPBACK_ADDRESSES.has(remoteAddress)) {
-            app.log.warn({ remoteAddress }, "rejected non-loopback autohost connection");
-            socket.close(1008, "autohost connections must originate from localhost");
+    socket.on("message", (raw: RawData) => {
+        let data: unknown;
+        try {
+            data = JSON.parse(raw.toString());
+        } catch {
+            socket.close(1008, "invalid json");
             return;
         }
 
-        app.log.info({ remoteAddress }, "autohost connected");
-
-        socket.on("message", (raw: RawData) => {
-            let data: unknown;
-            try {
-                data = JSON.parse(raw.toString());
-            } catch {
-                socket.close(1008, "invalid json");
-                return;
-            }
-
-            if (!parseAutohostMessage(data)) socket.close(1008, "invalid message");
-        });
+        // Not yet dispatched anywhere; validation only, matching this repo's "mostly unimplemented" scope.
+        if (!parseAutohostMessage(data)) socket.close(1008, "invalid message");
     });
-};
+}

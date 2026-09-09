@@ -1,18 +1,29 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 
+type AutohostStatus = {
+    status: "stopped" | "starting" | "running" | "stopping";
+    pid?: number;
+    startedAt?: number;
+    connected: boolean;
+};
+
 const password = ref("");
 const status = ref("");
 const error = ref("");
 const clientError = ref("");
 const connectedClients = ref<{ username: string; userId: string }[]>([]);
+const autohost = ref<AutohostStatus>({ status: "stopped", connected: false });
+const autohostError = ref("");
+const autohostActionPending = ref(false);
 let statusTimer: ReturnType<typeof setInterval> | undefined;
 
 async function loadStatus() {
     const response = await fetch("/api/admin/status");
     if (!response.ok) throw new Error("Unable to load server status");
-    const data = (await response.json()) as { clients?: { username: string; userId: string }[] };
+    const data = (await response.json()) as { clients?: { username: string; userId: string }[]; autohost?: AutohostStatus };
     connectedClients.value = data.clients ?? [];
+    if (data.autohost) autohost.value = data.autohost;
 }
 
 onMounted(async () => {
@@ -38,6 +49,30 @@ async function savePassword() {
     });
     if (response.ok) status.value = "Password updated.";
     else error.value = "Password could not be updated.";
+}
+
+async function startAutohost() {
+    autohostError.value = "";
+    autohostActionPending.value = true;
+    try {
+        const response = await fetch("/api/admin/autohost/start", { method: "POST" });
+        if (response.ok) autohost.value = await response.json();
+        else autohostError.value = "Could not start autohost.";
+    } finally {
+        autohostActionPending.value = false;
+    }
+}
+
+async function stopAutohost() {
+    autohostError.value = "";
+    autohostActionPending.value = true;
+    try {
+        const response = await fetch("/api/admin/autohost/stop", { method: "POST" });
+        if (response.ok) autohost.value = await response.json();
+        else autohostError.value = "Could not stop autohost.";
+    } finally {
+        autohostActionPending.value = false;
+    }
 }
 </script>
 
@@ -66,8 +101,18 @@ async function savePassword() {
             </ul>
         </section>
         <section>
-            <h2>Connected Autohosts</h2>
-            <p>No data yet.</p>
+            <h2>Autohost</h2>
+            <p>
+                Status: <strong>{{ autohost.connected ? "connected" : autohost.status }}</strong>
+                <span v-if="autohost.pid"> (pid {{ autohost.pid }})</span>
+            </p>
+            <button type="button" :disabled="autohostActionPending || autohost.status !== 'stopped'" @click="startAutohost">
+                Start autohost
+            </button>
+            <button type="button" :disabled="autohostActionPending || autohost.status === 'stopped'" @click="stopAutohost">
+                Stop autohost
+            </button>
+            <p v-if="autohostError" class="error">{{ autohostError }}</p>
         </section>
     </main>
 </template>

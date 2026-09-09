@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import type { FastifyPluginAsync } from "fastify";
 import { config } from "../config.js";
 import { genericLobbyClient, isValidRedirectUri } from "../auth/clients.js";
-import { createPendingRequest, consumeAuthCode, issueTokens, revokeToken, rotateRefreshToken } from "../auth/store.js";
+import { validateAutohostCredentials } from "../auth/autohostClients.js";
+import { createPendingRequest, consumeAuthCode, issueAutohostAccessToken, issueTokens, revokeToken, rotateRefreshToken } from "../auth/store.js";
 
 const scope = genericLobbyClient.scope;
 
@@ -22,10 +23,10 @@ export const oauthRoutes: FastifyPluginAsync = async (app) => {
             authorization_endpoint: `${config.publicUrl}/oauth2/authorize`,
             token_endpoint: `${config.publicUrl}/oauth2/token`,
             revocation_endpoint: `${config.publicUrl}/oauth2/revoke`,
-            response_types_supported: ["code"],
-            grant_types_supported: ["authorization_code", "refresh_token"],
+            response_types_supported: ["code", "token"],
+            grant_types_supported: ["authorization_code", "refresh_token", "client_credentials"],
             code_challenge_methods_supported: ["S256"],
-            token_endpoint_auth_methods_supported: ["none"],
+            token_endpoint_auth_methods_supported: ["none", "client_secret_basic"],
             revocation_endpoint_auth_methods_supported: ["none"],
             scopes_supported: [scope],
         };
@@ -64,6 +65,17 @@ export const oauthRoutes: FastifyPluginAsync = async (app) => {
     app.post("/oauth2/token", async (request, reply) => {
         const body = params(request.body);
         reply.header("Cache-Control", "no-store");
+        if (body.grant_type === "client_credentials") {
+            const match = request.headers.authorization?.match(/^Basic\s+(.+)$/i);
+            const decoded = match ? Buffer.from(match[1], "base64").toString("utf-8") : undefined;
+            const separator = decoded?.indexOf(":") ?? -1;
+            if (!decoded || separator < 0) return oauthError(reply, "invalid_client", "Missing client credentials");
+            const clientId = decodeURIComponent(decoded.slice(0, separator));
+            const clientSecret = decodeURIComponent(decoded.slice(separator + 1));
+            if (!validateAutohostCredentials(clientId, clientSecret)) return oauthError(reply, "invalid_client", "Unknown client");
+            const tokens = issueAutohostAccessToken(clientId, body.scope ?? "tachyon.lobby");
+            return { access_token: tokens.accessToken, token_type: "Bearer", expires_in: tokens.expiresIn, scope: tokens.scope };
+        }
         if (body.client_id !== genericLobbyClient.clientId) return oauthError(reply, "invalid_client", "Unknown client");
         if (body.grant_type === "authorization_code") {
             const authorizationCode = body.code ? consumeAuthCode(body.code) : undefined;

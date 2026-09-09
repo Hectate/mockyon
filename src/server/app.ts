@@ -4,10 +4,10 @@ import fastifyWebsocket from "@fastify/websocket";
 import { staticPlugin } from "./plugins/static.js";
 import { websocketOptions } from "./plugins/websocket.js";
 import { tachyonSocket } from "./ws/tachyonSocket.js";
-import { autohostSocket } from "./ws/autohostSocket.js";
 import { authRoutes } from "./routes/auth.js";
 import { adminRoutes } from "./routes/admin.js";
 import { oauthRoutes } from "./routes/oauth.js";
+import { stopAutohostProcess } from "./autohost/process.js";
 import { config } from "./config.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -28,10 +28,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     await app.register(staticPlugin);
     await app.register(fastifyWebsocket, websocketOptions);
     await app.register(tachyonSocket);
-    await app.register(autohostSocket);
     await app.register(authRoutes);
     await app.register(adminRoutes);
     await app.register(oauthRoutes);
+
+    app.addHook("onClose", async () => {
+        stopAutohostProcess(app.log);
+    });
 
     return app;
 }

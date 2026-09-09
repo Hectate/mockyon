@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
-import { getUserId, validateAccessToken } from "../auth/store.js";
+import { getUserId, validateAccessToken, type ValidatedAccess } from "../auth/store.js";
 import { broadcastToOtherConnectedClients, getConnectedClients, registerConnectedClient, unregisterConnectedClient } from "./connectedClients.js";
+import { handleAutohostConnection } from "./autohostSocket.js";
 import { handleRequest } from "./tachyon/dispatcher.js";
 import { createSelfEvent } from "./tachyon/user/self.js";
 import { createUserUpdatedEvent } from "./tachyon/user/updated.js";
@@ -9,11 +10,11 @@ import type { RawData } from "./tachyon/types.js";
 
 declare module "fastify" {
     interface FastifyRequest {
-        tachyonUsername?: string;
+        tachyonAccess?: ValidatedAccess;
     }
 }
 
-// Represents the Tachyon "user"/client actor connection: wss://<server>/tachyon
+// Represents the Tachyon "user"/client and "autohost" actor connections: wss://<server>/tachyon
 export const tachyonSocket: FastifyPluginAsync = async (app) => {
     app.get(
         "/tachyon",
@@ -26,11 +27,18 @@ export const tachyonSocket: FastifyPluginAsync = async (app) => {
                     reply.code(401).header("WWW-Authenticate", 'Bearer realm="tachyon", error="invalid_token"').send({ error: "invalid_token" });
                     return;
                 }
-                request.tachyonUsername = access.username;
+                request.tachyonAccess = access;
             },
         },
         (socket, request) => {
-            app.log.info({ remoteAddress: request.raw.socket.remoteAddress, username: request.tachyonUsername }, "tachyon client connected");
+            const access = request.tachyonAccess;
+            if (!access) return;
+            if (access.actor === "autohost") {
+                handleAutohostConnection(app, socket, request, access.clientId);
+                return;
+            }
+
+            app.log.info({ remoteAddress: request.raw.socket.remoteAddress, username: access.username }, "tachyon client connected");
 
             let isAlive = true;
             const heartbeat = setInterval(() => {
@@ -52,7 +60,7 @@ export const tachyonSocket: FastifyPluginAsync = async (app) => {
             socket.on("close", cleanup);
             socket.on("error", cleanup);
 
-            const username = request.tachyonUsername ?? "";
+            const username = access.username;
             const context = {
                 username,
                 userId: getUserId(username),

@@ -6,6 +6,8 @@ Mockyon is a pseudo-server for Beyond All Reason clients, specifically using [Ta
 
 While all requests, responses, and events will conform to protocol, most will not be implemented. Those that are implemented may be disabled at will via the web interface.
 
+A pinned copy of [Recoil-Autohost](https://github.com/beyond-all-reason/recoil-autohost) is vendored under `vendor/recoil-autohost/` (see `vendor/recoil-autohost/VENDORED_COMMIT.md` for the exact commit) and is licensed separately under Apache-2.0 — see `vendor/recoil-autohost/LICENSE`/`AUTHORS`. It's wired up as an npm workspace so `npm install` at the repo root installs its dependencies too; Mockyon can start and stop it directly from the admin panel.
+
 ## Installation
 
 1. Clone the repository.
@@ -57,9 +59,7 @@ While all requests, responses, and events will conform to protocol, most will no
 
 3. Connect clients (local or remote) to the mock Tachyon websocket endpoint at `ws://<server-host>:8080/tachyon`.
 
-4. Connect a recoil-autohost instance running on the **same local machine** to `ws://localhost:8080/autohost`. Connections from non-loopback addresses are rejected.
-
-       <!-- TODO: installation/configuration steps for the recoil-autohost itself -->
+4. The vendored recoil-autohost isn't started automatically — use the **Start autohost** button on the admin panel to spawn it as a child process. It authenticates with a generated OAuth2 client-credentials pair and connects back to the same `/tachyon` endpoint as regular clients. Only one autohost runs at a time; use **Stop autohost** to shut it down, and note that starting a battle isn't functional yet since engine/map assets aren't provisioned (see the vendored project's own `engines/` folder requirement).
 
 ## Development
 
