@@ -23,6 +23,10 @@ const pendingRequests = new Map<string, PendingAuthRequest>();
 const authCodes = new Map<string, AuthCode>();
 const accessTokens = new Map<string, AccessToken>();
 const refreshTokens = new Map<string, RefreshToken>();
+const userIds = new Map<string, string>();
+
+// Never reused, never swept: an id stays valid for the lifetime of the process.
+let nextUserId = 1;
 
 function token(): string {
     return randomBytes(32).toString("base64url");
@@ -36,6 +40,14 @@ export function createSession(username: string): string {
 
 export function getSession(sessionId: string): Session | undefined {
     return sessions.get(sessionId);
+}
+
+export function getUserId(username: string): string {
+    const existing = userIds.get(username);
+    if (existing) return existing;
+    const id = String(nextUserId++);
+    userIds.set(username, id);
+    return id;
 }
 
 export function createPendingRequest(request: PendingAuthRequest): string {

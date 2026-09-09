@@ -5,6 +5,7 @@ export default {
     semi: true,
     singleQuote: false,
     printWidth: 200,
+    endOfLine: "crlf",
     overrides: [
         {
             files: "src/client/**/*.vue",

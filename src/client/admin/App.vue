@@ -1,14 +1,32 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 
 const password = ref("");
 const status = ref("");
 const error = ref("");
+const clientError = ref("");
+const connectedClients = ref<{ username: string; userId: string }[]>([]);
+let statusTimer: ReturnType<typeof setInterval> | undefined;
+
+async function loadStatus() {
+    const response = await fetch("/api/admin/status");
+    if (!response.ok) throw new Error("Unable to load server status");
+    const data = (await response.json()) as { clients?: { username: string; userId: string }[] };
+    connectedClients.value = data.clients ?? [];
+}
 
 onMounted(async () => {
     const response = await fetch("/api/admin/password");
     if (response.ok) password.value = (await response.json()).password;
+    try {
+        await loadStatus();
+        statusTimer = setInterval(() => void loadStatus().catch(() => (clientError.value = "Unable to load server status.")), 5000);
+    } catch {
+        clientError.value = "Unable to load server status.";
+    }
 });
+
+onUnmounted(() => clearInterval(statusTimer));
 
 async function savePassword() {
     status.value = "";
@@ -41,7 +59,11 @@ async function savePassword() {
         </section>
         <section>
             <h2>Connected Clients</h2>
-            <p>No data yet.</p>
+            <p v-if="clientError" class="error">{{ clientError }}</p>
+            <p v-else-if="connectedClients.length === 0">No clients connected.</p>
+            <ul v-else>
+                <li v-for="client in connectedClients" :key="client.userId">{{ client.username }} (ID: {{ client.userId }})</li>
+            </ul>
         </section>
         <section>
             <h2>Connected Autohosts</h2>

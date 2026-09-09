@@ -4,7 +4,7 @@ import { createEvent } from "../messages.js";
 export function createSelfEvent(context: TachyonContext): TachyonEvent {
     return createEvent("user/self", {
         user: {
-            userId: context.username,
+            userId: context.userId,
             username: context.username,
             displayName: context.username,
             clanBaseData: null,

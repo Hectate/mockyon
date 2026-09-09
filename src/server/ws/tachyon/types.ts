@@ -13,6 +13,7 @@ export type TachyonRequest = TachyonMessage & {
 
 export type TachyonContext = {
     username: string;
+    userId: string;
 };
 
 export type TachyonResponse = {

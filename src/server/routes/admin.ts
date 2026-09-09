@@ -1,9 +1,11 @@
 import type { FastifyPluginAsync } from "fastify";
 import { getPassword, setPassword } from "../auth/password.js";
+import { getConnectedClientCount, getConnectedClients } from "../ws/connectedClients.js";
 
 export const adminRoutes: FastifyPluginAsync = async (app) => {
     app.get("/api/admin/status", async () => ({
-        connectedClients: 0,
+        connectedClients: getConnectedClientCount(),
+        clients: getConnectedClients(),
         connectedAutohosts: 0,
     }));
 
