@@ -25,6 +25,7 @@ const port = Number(process.env.PORT ?? 8080);
 export const config = {
     host,
     port,
+    logLevel: process.env.LOG_LEVEL ?? "info",
     initialPassword: configuredPassword ?? generatePassword(),
     passwordFromEnv: configuredPassword !== undefined,
     publicUrl: process.env.PUBLIC_URL ?? `http://${host === "0.0.0.0" ? "localhost" : host}:${port}`,
