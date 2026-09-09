@@ -1,7 +1,7 @@
 import { getConnectedClientCount } from "../../connectedClients.js";
-import type { TachyonRequest, TachyonResponse } from "../types.js";
+import type { TachyonRequestFor, TachyonSuccessResponseFor } from "../types.js";
 
-export function handleServerStats(request: TachyonRequest): TachyonResponse {
+export function handleServerStats(request: TachyonRequestFor<"system/serverStats">): TachyonSuccessResponseFor<"system/serverStats"> {
     return {
         type: "response",
         messageId: request.messageId,

@@ -1,7 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
-
-// Matches the shape of ws's RawData without depending on its type package.
-type RawData = Buffer | ArrayBuffer | Buffer[];
+import { parseAutohostMessage } from "./tachyon/messages.js";
+import type { RawData } from "./tachyon/types.js";
 
 const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
@@ -19,7 +18,6 @@ export const autohostSocket: FastifyPluginAsync = async (app) => {
 
         app.log.info({ remoteAddress }, "autohost connected");
 
-        // Stub only: no schema validation or command routing yet, just echo back as an event.
         socket.on("message", (raw: RawData) => {
             let data: unknown;
             try {
@@ -29,13 +27,7 @@ export const autohostSocket: FastifyPluginAsync = async (app) => {
                 return;
             }
 
-            socket.send(
-                JSON.stringify({
-                    type: "event",
-                    commandId: "system/echo",
-                    data,
-                })
-            );
+            if (!parseAutohostMessage(data)) socket.close(1008, "invalid message");
         });
     });
 };

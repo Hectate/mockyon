@@ -4,7 +4,7 @@ import { broadcastToOtherConnectedClients, getConnectedClients, registerConnecte
 import { handleRequest } from "./tachyon/dispatcher.js";
 import { createSelfEvent } from "./tachyon/user/self.js";
 import { createUserUpdatedEvent } from "./tachyon/user/updated.js";
-import { parseRequest } from "./tachyon/messages.js";
+import { parseRequest, serializeOutgoingMessage } from "./tachyon/messages.js";
 import type { RawData } from "./tachyon/types.js";
 
 declare module "fastify" {
@@ -59,8 +59,8 @@ export const tachyonSocket: FastifyPluginAsync = async (app) => {
             };
             const existingClients = getConnectedClients().filter((client) => client.username !== username);
             registerConnectedClient(context, socket);
-            socket.send(JSON.stringify(createSelfEvent(context)));
-            socket.send(JSON.stringify(createUserUpdatedEvent(existingClients)));
+            socket.send(serializeOutgoingMessage(createSelfEvent(context)));
+            socket.send(serializeOutgoingMessage(createUserUpdatedEvent(existingClients)));
             broadcastToOtherConnectedClients(username, createUserUpdatedEvent([context]));
 
             socket.on("message", (raw: RawData) => {
@@ -79,7 +79,7 @@ export const tachyonSocket: FastifyPluginAsync = async (app) => {
                 }
 
                 const response = handleRequest(command, context);
-                socket.send(JSON.stringify(response), () => {
+                socket.send(serializeOutgoingMessage(response), () => {
                     if (command.commandId === "system/disconnect") socket.close(1000, "client requested disconnect");
                 });
             });

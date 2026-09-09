@@ -1,6 +1,6 @@
-import type { TachyonRequest, TachyonResponse } from "../types.js";
+import type { TachyonRequestFor, TachyonSuccessResponseFor } from "../types.js";
 
-export function handleUnsubscribeUpdates(request: TachyonRequest): TachyonResponse {
+export function handleUnsubscribeUpdates(request: TachyonRequestFor<"user/unsubscribeUpdates">): TachyonSuccessResponseFor<"user/unsubscribeUpdates"> {
     return {
         type: "response",
         messageId: request.messageId,

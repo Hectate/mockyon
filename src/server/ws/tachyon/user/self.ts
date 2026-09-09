@@ -1,7 +1,7 @@
-import type { TachyonContext, TachyonEvent } from "../types.js";
+import type { TachyonContext, TachyonEventFor } from "../types.js";
 import { createEvent } from "../messages.js";
 
-export function createSelfEvent(context: TachyonContext): TachyonEvent {
+export function createSelfEvent(context: TachyonContext): TachyonEventFor<"user/self"> {
     return createEvent("user/self", {
         user: {
             userId: context.userId,

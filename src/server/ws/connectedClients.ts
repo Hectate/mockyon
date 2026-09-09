@@ -1,3 +1,6 @@
+import { serializeOutgoingMessage } from "./tachyon/messages.js";
+import type { TachyonEvent } from "./tachyon/types.js";
+
 type ClientSocket = {
     close: (code?: number, data?: string) => void;
     send: (data: string, callback?: (error?: Error) => void) => void;
@@ -30,8 +33,8 @@ export function getConnectedClients(): ConnectedClient[] {
     return [...clients.values()].map(({ username, userId }) => ({ username, userId }));
 }
 
-export function broadcastToOtherConnectedClients(username: string, data: unknown): void {
-    const message = JSON.stringify(data);
+export function broadcastToOtherConnectedClients(username: string, event: TachyonEvent): void {
+    const message = serializeOutgoingMessage(event);
     for (const client of clients.values()) {
         if (client.username !== username) client.socket.send(message);
     }

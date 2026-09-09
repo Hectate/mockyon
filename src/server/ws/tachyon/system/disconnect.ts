@@ -1,6 +1,6 @@
-import type { TachyonRequest, TachyonResponse } from "../types.js";
+import type { TachyonRequestFor, TachyonSuccessResponseFor } from "../types.js";
 
-export function handleDisconnect(request: TachyonRequest): TachyonResponse {
+export function handleDisconnect(request: TachyonRequestFor<"system/disconnect">): TachyonSuccessResponseFor<"system/disconnect"> {
     return {
         type: "response",
         messageId: request.messageId,
