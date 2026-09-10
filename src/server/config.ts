@@ -35,4 +35,8 @@ export const config = {
     vendorAutohostDir: path.resolve(here, "../../vendor/recoil-autohost"),
     // build/server/config.js -> repo root
     repoRoot: path.resolve(here, "../.."),
+    // Engine release API endpoint (mirrors bar-lobby's engineReleaseUrl)
+    engineReleaseUrl: process.env.ENGINE_RELEASE_URL ?? "https://files-cdn.beyondallreason.dev/find",
+    // Engines directory (relative to repo root)
+    enginesDir: path.resolve(here, "../../engines"),
 };
