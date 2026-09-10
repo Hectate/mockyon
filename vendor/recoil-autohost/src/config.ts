@@ -23,6 +23,7 @@ export interface Config {
 	engineStartPort: number;
 	engineAutohostStartPort: number;
 	maxPortsUsed: number;
+	enginesPath: string | null;
 	engineInstallTimeoutSeconds: number;
 	maxGameDurationSeconds: number;
 }
@@ -110,6 +111,11 @@ const ConfigSchema: JSONSchemaType<Config> = {
 				'Maximum number of ports that can be used by the service, this +StartPorts define the port range.',
 			default: 1000,
 			minimum: 1,
+		},
+		enginesPath: {
+			type: 'string',
+			description: 'Directory where installed engine versions are stored.',
+			default: 'engines',
 		},
 		engineInstallTimeoutSeconds: {
 			type: 'integer',

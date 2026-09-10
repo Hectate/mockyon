@@ -103,7 +103,8 @@ suite('engineRunner', () => {
 	test('engineRunner spawns process correctly', async () => {
 		const er = new EngineRunnerImpl(
 			getEnv(((cmd: string, args: string[], opts: SpawnOptions) => {
-				assert.match(cmd, /.*\/engines\/test\/spring-dedicated$/);
+				const executable = process.platform === 'win32' ? 'spring-dedicated.exe' : 'spring-dedicated';
+				assert.match(cmd.replaceAll('\\', '/'), new RegExp(`.*/engines/test/${executable}$`));
 				return spawn('echo', args, opts);
 			}) as typeof spawn),
 		);

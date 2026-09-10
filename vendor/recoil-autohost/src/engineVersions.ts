@@ -24,6 +24,7 @@ export interface EngineVersionsManager extends TypedEmitter<EngineVersionsManage
 
 interface Config {
 	engineInstallTimeoutSeconds: number;
+	enginesPath?: string | null;
 }
 
 interface Mocks {
@@ -53,11 +54,12 @@ export class EngineVersionsManagerImpl
 		super();
 		this.env = env;
 		this.logger = env.logger.child({ class: 'EngineVersionsManager' });
+		const enginesPath = env.config.enginesPath ?? 'engines';
 
-		fs.mkdirSync('engines', { recursive: true });
+		fs.mkdirSync(enginesPath, { recursive: true });
 
 		this.watcher = new FSWatcher({
-			cwd: 'engines',
+			cwd: enginesPath,
 			depth: 0,
 		});
 

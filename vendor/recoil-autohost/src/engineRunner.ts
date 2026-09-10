@@ -83,6 +83,7 @@ interface Mocks {
 
 interface Config {
 	engineSettings: { [k: string]: string };
+	enginesPath?: string | null;
 }
 
 export type Env = Environment<Config, Mocks>;
@@ -287,7 +288,8 @@ export class EngineRunnerImpl extends TypedEmitter<EngineRunnerEvents> implement
 		instanceDir: string,
 		startRequest: AutohostStartRequestData,
 	): Promise<void> {
-		const engineDir = path.resolve('engines', startRequest.engineVersion);
+		const enginesPath = this.env.config.enginesPath ?? 'engines';
+		const engineDir = path.resolve(enginesPath, startRequest.engineVersion);
 		if (!(await fs.stat(engineDir).catch(() => null))) {
 			throw new TachyonError<'autohost/start'>(
 				'engine_version_not_available',
@@ -298,7 +300,7 @@ export class EngineRunnerImpl extends TypedEmitter<EngineRunnerEvents> implement
 		if (this.state != State.Starting) return;
 
 		this.engineProcess = (this.env.mocks?.spawn ?? spawn)(
-			path.join(engineDir, 'spring-dedicated'),
+			path.join(engineDir, process.platform === 'win32' ? 'spring-dedicated.exe' : 'spring-dedicated'),
 			['-isolation', path.join(instanceDir, 'script.txt')],
 			{
 				cwd: instanceDir,
