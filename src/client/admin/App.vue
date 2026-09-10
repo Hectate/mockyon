@@ -26,6 +26,7 @@ const engineVersion = ref("");
 const engineDownloadStatus = ref("");
 const engineDownloadError = ref("");
 const engineDownloadPending = ref(false);
+const shutdownConfirmationOpen = ref(false);
 let statusTimer: ReturnType<typeof setInterval> | undefined;
 
 async function loadStatus() {
@@ -134,11 +135,42 @@ async function downloadEngine() {
     }
 }
 
+async function shutdownServer() {
+    try {
+        await fetch("/api/admin/shutdown", { method: "POST" });
+        // Server will shut down after a brief delay
+        // Optionally redirect or show message
+        setTimeout(() => {
+            clientError.value = "Server has been shut down.";
+        }, 500);
+    } catch (e) {
+        clientError.value = e instanceof Error ? e.message : "Failed to shut down server.";
+    }
+}
+
+function openShutdownConfirmation() {
+    shutdownConfirmationOpen.value = true;
+}
+
+function cancelShutdown() {
+    shutdownConfirmationOpen.value = false;
+}
+
+function confirmShutdown() {
+    shutdownConfirmationOpen.value = false;
+    void shutdownServer();
+}
+
 </script>
 
 <template>
     <main class="page">
-        <h1>Mockyon Admin</h1>
+        <div class="header">
+            <h1>Mockyon Admin</h1>
+            <button type="button" class="shutdown-button" @click="openShutdownConfirmation">
+                Shut Down Server
+            </button>
+        </div>
         <p class="notice">A web interface for managing the Mockyon server.</p>
         <section>
             <h2>Server Password</h2>
@@ -197,6 +229,24 @@ async function downloadEngine() {
             <p v-if="engineDownloadStatus" class="success">{{ engineDownloadStatus }}</p>
             <p v-if="engineDownloadError" class="error">{{ engineDownloadError }}</p>
         </section>
+
+        <!-- Shutdown Confirmation Dialog -->
+        <div v-if="shutdownConfirmationOpen" class="modal-overlay">
+            <div class="modal">
+                <h2>Confirm Server Shutdown</h2>
+                <p>This will:</p>
+                <ul>
+                    <li>Stop the autohost if running</li>
+                    <li>Cancel any in-progress engine downloads</li>
+                    <li>Gracefully shut down the server</li>
+                </ul>
+                <p><strong>Are you sure?</strong></p>
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-button" @click="cancelShutdown">Cancel</button>
+                    <button type="button" class="confirm-button" @click="confirmShutdown">Shut Down Server</button>
+                </div>
+            </div>
+        </div>
     </main>
 </template>
 
@@ -272,5 +322,92 @@ section {
 }
 .download-form button:hover:not(:disabled) {
     background-color: #0860ca;
+}
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+.header h1 {
+    margin: 0;
+    flex: 1;
+}
+.shutdown-button {
+    padding: 0.5rem 1rem;
+    background-color: #da2e1f;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.shutdown-button:hover {
+    background-color: #c41409;
+}
+.shutdown-button:active {
+    background-color: #a30e05;
+}
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+.modal {
+    background-color: white;
+    border-radius: 8px;
+    padding: 2rem;
+    max-width: 400px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+.modal h2 {
+    margin-top: 0;
+    color: #d1242f;
+}
+.modal p {
+    margin: 0.5rem 0;
+}
+.modal ul {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+}
+.modal-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+    margin-top: 1.5rem;
+}
+.cancel-button {
+    padding: 0.5rem 1rem;
+    background-color: #6e7681;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+}
+.cancel-button:hover {
+    background-color: #57606a;
+}
+.confirm-button {
+    padding: 0.5rem 1rem;
+    background-color: #da2e1f;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+}
+.confirm-button:hover {
+    background-color: #c41409;
 }
 </style>

@@ -61,4 +61,21 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
                 });
         }
     });
+
+    app.post("/api/admin/shutdown", async (request, reply) => {
+        // Stop autohost if running
+        stopAutohostProcess(app.log);
+
+        // Send success response before shutting down
+        reply.code(200).send({ success: true });
+
+        // Give the response time to send, then gracefully shutdown
+        setTimeout(() => {
+            app.log.info("Server shutting down on admin request");
+            app.close().catch((err) => {
+                app.log.error(err, "Error closing server");
+                process.exit(1);
+            });
+        }, 100);
+    });
 };
