@@ -27,10 +27,7 @@ export interface InstalledEngine {
  * Gets available engine versions from the remote engine release API.
  * Follows bar-lobby's pattern: queries engineReleaseUrl with platform-specific category.
  */
-export async function getAvailableEngines(
-    engineReleaseUrl: string,
-    engineVersion: string,
-): Promise<EngineReleaseInfo> {
+export async function getAvailableEngines(engineReleaseUrl: string, engineVersion: string): Promise<EngineReleaseInfo> {
     const archStr = process.platform === "win32" ? "engine_windows64" : "engine_linux64";
     const url = new URL(engineReleaseUrl);
     url.searchParams.set("category", archStr);
@@ -89,7 +86,7 @@ export async function downloadAndExtractEngine(
     engineVersion: string,
     engineReleaseUrl: string,
     enginesDir: string,
-    onProgress?: (progress: { phase: string; loaded: number; total: number }) => void,
+    onProgress?: (progress: { phase: string; loaded: number; total: number }) => void
 ): Promise<void> {
     // Create engines directory
     await fs.mkdir(enginesDir, { recursive: true });

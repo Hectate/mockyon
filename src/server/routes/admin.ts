@@ -53,12 +53,10 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
             return { success: true, engines };
         } catch (error) {
             app.log.error(error);
-            return reply
-                .code(500)
-                .send({
-                    error: "download_failed",
-                    message: error instanceof Error ? error.message : String(error),
-                });
+            return reply.code(500).send({
+                error: "download_failed",
+                message: error instanceof Error ? error.message : String(error),
+            });
         }
     });
 

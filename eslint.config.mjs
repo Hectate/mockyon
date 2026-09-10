@@ -7,7 +7,7 @@ import eslintConfigPrettier from "eslint-config-prettier";
 
 export default [
     {
-        ignores: ["**/build", "**/node_modules", "package-lock.json", "vendor/**"],
+        ignores: ["**/build", "**/node_modules", "package-lock.json", "vendor/**", "engines/**"],
     },
     {
         languageOptions: {

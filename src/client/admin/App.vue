@@ -160,16 +160,13 @@ function confirmShutdown() {
     shutdownConfirmationOpen.value = false;
     void shutdownServer();
 }
-
 </script>
 
 <template>
     <main class="page">
         <div class="header">
             <h1>Mockyon Admin</h1>
-            <button type="button" class="shutdown-button" @click="openShutdownConfirmation">
-                Shut Down Server
-            </button>
+            <button type="button" class="shutdown-button" @click="openShutdownConfirmation">Shut Down Server</button>
         </div>
         <p class="notice">A web interface for managing the Mockyon server.</p>
         <section>
