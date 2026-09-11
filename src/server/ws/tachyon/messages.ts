@@ -64,12 +64,16 @@ export function createUnimplementedResponse(request: TachyonRequest): TachyonRes
     } as TachyonResponse;
 }
 
-export function createEvent<CommandId extends TachyonEventCommandId>(commandId: CommandId, data: TachyonEventDataFor<CommandId>): TachyonEventFor<CommandId> {
+// Events without a payload (e.g. matchmaking/lost) resolve their data type to never.
+type EventArgs<CommandId extends TachyonEventCommandId> = [TachyonEventDataFor<CommandId>] extends [never] ? [] : [data: TachyonEventDataFor<CommandId>];
+
+export function createEvent<CommandId extends TachyonEventCommandId>(commandId: CommandId, ...args: EventArgs<CommandId>): TachyonEventFor<CommandId> {
+    const [data] = args as [TachyonEventDataFor<CommandId>?];
     return {
         type: "event",
         messageId: randomUUID(),
         commandId,
-        data,
+        ...(data === undefined ? {} : { data }),
     } as unknown as TachyonEventFor<CommandId>;
 }
 
