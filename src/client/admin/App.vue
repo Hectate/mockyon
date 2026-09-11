@@ -13,11 +13,22 @@ type Engine = {
     exists: boolean;
 };
 
+type MatchmakingState =
+    | { state: "no_matchmaking" }
+    | { state: "queuing"; queues: { id: string; version: string }[] }
+    | { state: "found"; queue: { id: string; version: string; timeoutAt: number; hasAlreadyReadied: boolean } };
+
+type ConnectedClient = {
+    username: string;
+    userId: string;
+    matchmaking?: MatchmakingState;
+};
+
 const password = ref("");
 const status = ref("");
 const error = ref("");
 const clientError = ref("");
-const connectedClients = ref<{ username: string; userId: string }[]>([]);
+const connectedClients = ref<ConnectedClient[]>([]);
 const autohost = ref<AutohostStatus>({ status: "stopped", connected: false });
 const autohostError = ref("");
 const autohostActionPending = ref(false);
@@ -27,14 +38,47 @@ const engineDownloadStatus = ref("");
 const engineDownloadError = ref("");
 const engineDownloadPending = ref(false);
 const shutdownConfirmationOpen = ref(false);
+const foundTimeoutSeconds = ref(20);
+const matchmakingStatus = ref("");
+const matchmakingError = ref("");
 let statusTimer: ReturnType<typeof setInterval> | undefined;
+
+function describeMatchmaking(matchmaking?: MatchmakingState): string {
+    if (matchmaking?.state === "queuing") return `queuing: ${matchmaking.queues.map((queue) => queue.id).join(", ")}`;
+    if (matchmaking?.state === "found") return `match found: ${matchmaking.queue.id}`;
+    return "not queued";
+}
+
+async function saveMatchmakingTimeout() {
+    matchmakingStatus.value = "";
+    matchmakingError.value = "";
+    try {
+        const response = await fetch("/api/admin/matchmaking/timeout", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ foundTimeoutSeconds: Number(foundTimeoutSeconds.value) }),
+        });
+        if (!response.ok) throw new Error("Timeout must be a positive number of seconds.");
+        const data = (await response.json()) as { foundTimeoutSeconds: number };
+        foundTimeoutSeconds.value = data.foundTimeoutSeconds;
+        matchmakingStatus.value = "Match found timeout saved.";
+    } catch (e) {
+        matchmakingError.value = e instanceof Error ? e.message : "Failed to save timeout.";
+    }
+}
 
 async function loadStatus() {
     const response = await fetch("/api/admin/status");
     if (!response.ok) throw new Error("Unable to load server status");
-    const data = (await response.json()) as { clients?: { username: string; userId: string }[]; autohost?: AutohostStatus };
+    const data = (await response.json()) as {
+        clients?: ConnectedClient[];
+        autohost?: AutohostStatus;
+        matchmaking?: { foundTimeoutSeconds: number };
+    };
     connectedClients.value = data.clients ?? [];
     if (data.autohost) autohost.value = data.autohost;
+    if (data.matchmaking && document.activeElement?.id !== "found-timeout")
+        foundTimeoutSeconds.value = data.matchmaking.foundTimeoutSeconds;
 }
 
 async function loadInstalledEngines() {
@@ -186,8 +230,23 @@ function confirmShutdown() {
             <p v-if="clientError" class="error">{{ clientError }}</p>
             <p v-else-if="connectedClients.length === 0">No clients connected.</p>
             <ul v-else>
-                <li v-for="client in connectedClients" :key="client.userId">{{ client.username }} (ID: {{ client.userId }})</li>
+                <li v-for="client in connectedClients" :key="client.userId">
+                    {{ client.username }} (ID: {{ client.userId }})
+                    <span class="matchmaking">{{ describeMatchmaking(client.matchmaking) }}</span>
+                </li>
             </ul>
+        </section>
+        <section>
+            <h2>Matchmaking</h2>
+            <form @submit.prevent="saveMatchmakingTimeout">
+                <label>
+                    Match found timeout (seconds)
+                    <input id="found-timeout" v-model.number="foundTimeoutSeconds" type="number" min="0.1" step="0.1" />
+                </label>
+                <button type="submit">Save timeout</button>
+            </form>
+            <p v-if="matchmakingStatus" class="success">{{ matchmakingStatus }}</p>
+            <p v-if="matchmakingError" class="error">{{ matchmakingError }}</p>
         </section>
         <section>
             <h2>Autohost</h2>
@@ -265,6 +324,10 @@ function confirmShutdown() {
 }
 .warning {
     color: #bf8700;
+    font-size: 0.9em;
+}
+.matchmaking {
+    color: #666;
     font-size: 0.9em;
 }
 section {

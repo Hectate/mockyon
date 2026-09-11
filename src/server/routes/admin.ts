@@ -5,13 +5,24 @@ import { getConnectedClientCount, getConnectedClients } from "../ws/connectedCli
 import { isAutohostConnected } from "../ws/connectedAutohosts.js";
 import { config } from "../config.js";
 import { downloadAndExtractEngine, listInstalledEngines } from "../services/engineService.js";
+import { getFoundTimeoutSeconds, setFoundTimeoutSeconds } from "../ws/tachyon/matchmaking/matchmaker.js";
 
 export const adminRoutes: FastifyPluginAsync = async (app) => {
     app.get("/api/admin/status", async () => ({
         connectedClients: getConnectedClientCount(),
         clients: getConnectedClients(),
         autohost: { ...getAutohostProcessState(), connected: isAutohostConnected() },
+        matchmaking: { foundTimeoutSeconds: getFoundTimeoutSeconds() },
     }));
+
+    app.put("/api/admin/matchmaking/timeout", async (request, reply) => {
+        const seconds = Number((request.body as { foundTimeoutSeconds?: unknown } | undefined)?.foundTimeoutSeconds);
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+            return reply.code(400).send({ error: "invalid_timeout" });
+        }
+        setFoundTimeoutSeconds(seconds);
+        return { foundTimeoutSeconds: getFoundTimeoutSeconds() };
+    });
 
     app.get("/api/admin/password", async () => ({ password: getPassword() }));
 

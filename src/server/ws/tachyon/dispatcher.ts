@@ -1,3 +1,6 @@
+import { handleMatchmakingList } from "./matchmaking/list.js";
+import { handleMatchmakingQueue } from "./matchmaking/queue.js";
+import { handleMatchmakingReady } from "./matchmaking/ready.js";
 import { handleSubscribeReceived } from "./messaging/subscribeReceived.js";
 import { handleDisconnect } from "./system/disconnect.js";
 import { handleServerStats } from "./system/serverStats.js";
@@ -14,6 +17,9 @@ type RequestHandlers = {
 };
 
 const requestHandlers: RequestHandlers = {
+    "matchmaking/list": handleMatchmakingList,
+    "matchmaking/queue": handleMatchmakingQueue,
+    "matchmaking/ready": handleMatchmakingReady,
     "messaging/subscribeReceived": handleSubscribeReceived,
     "system/disconnect": handleDisconnect,
     "system/serverStats": handleServerStats,
