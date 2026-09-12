@@ -48,6 +48,7 @@ export function startAutohostProcess(logger: FastifyBaseLogger): { ok: true } | 
         authClientSecret: clientSecret,
         hostingIP: "127.0.0.1",
         enginesPath: config.enginesDir,
+        instancesPath: config.instancesDir,
     };
     const configPath = path.join(tmpdir(), `mockyon-autohost-${randomBytes(8).toString("hex")}.json`);
     writeFileSync(configPath, JSON.stringify(autohostConfig, null, 2), "utf-8");

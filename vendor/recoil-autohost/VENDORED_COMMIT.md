@@ -9,3 +9,13 @@ licensed under Apache-2.0 (see `LICENSE`/`AUTHORS`/`REUSE.toml`).
 To update, re-copy `src/`, `package.json`, `tsconfig.json`, `tsconfig.prod.json`, `LICENSE`, `AUTHORS`,
 `REUSE.toml`, and `LICENSES/` from a newer upstream commit, update the commit SHA above, and re-run
 `npm install` at the repo root.
+
+## Local modifications
+
+Re-apply these after any update:
+
+- `src/engineRunner.ts`: the dedicated server executable is resolved per platform
+  (`spring-dedicated.exe` on Windows).
+- `src/engineRunner.ts` / `src/config.ts`: added an `instancesPath` config option so battle instance
+  directories are no longer hardcoded relative to the process working directory. Defaults to
+  `instances` to match previous behaviour.

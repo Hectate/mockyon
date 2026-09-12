@@ -84,6 +84,7 @@ interface Mocks {
 interface Config {
 	engineSettings: { [k: string]: string };
 	enginesPath?: string | null;
+	instancesPath?: string | null;
 }
 
 export type Env = Environment<Config, Mocks>;
@@ -359,7 +360,8 @@ export class EngineRunnerImpl extends TypedEmitter<EngineRunnerEvents> implement
 		game['AutohostPort'] = opts.autohostPort;
 		const script = tdf.serialize({ 'GAME': game });
 
-		const instanceDir = path.resolve('instances', opts.startRequest.battleId);
+		const instancesPath = this.env.config.instancesPath ?? 'instances';
+		const instanceDir = path.resolve(instancesPath, opts.startRequest.battleId);
 		await fs.mkdir(instanceDir, { recursive: true });
 		const scriptPath = path.join(instanceDir, 'script.txt');
 		await fs.writeFile(scriptPath, script);

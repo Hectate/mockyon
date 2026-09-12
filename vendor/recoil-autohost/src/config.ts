@@ -24,6 +24,7 @@ export interface Config {
 	engineAutohostStartPort: number;
 	maxPortsUsed: number;
 	enginesPath: string | null;
+	instancesPath: string | null;
 	engineInstallTimeoutSeconds: number;
 	maxGameDurationSeconds: number;
 }
@@ -116,6 +117,11 @@ const ConfigSchema: JSONSchemaType<Config> = {
 			type: 'string',
 			description: 'Directory where installed engine versions are stored.',
 			default: 'engines',
+		},
+		instancesPath: {
+			type: 'string',
+			description: 'Directory where per-battle instance directories are created.',
+			default: 'instances',
 		},
 		engineInstallTimeoutSeconds: {
 			type: 'integer',

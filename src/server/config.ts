@@ -39,4 +39,6 @@ export const config = {
     engineReleaseUrl: process.env.ENGINE_RELEASE_URL ?? "https://files-cdn.beyondallreason.dev/find",
     // Engines directory (relative to repo root)
     enginesDir: path.resolve(here, "../../engines"),
+    // Per-battle autohost instance directories, kept alongside the engines directory
+    instancesDir: path.resolve(here, "../../instances"),
 };
