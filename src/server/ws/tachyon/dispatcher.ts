@@ -1,3 +1,4 @@
+import { handleLobbySubscribeList } from "./lobby/subscribeList.js";
 import { handleMatchmakingCancel } from "./matchmaking/cancel.js";
 import { handleMatchmakingList } from "./matchmaking/list.js";
 import { handleMatchmakingQueue } from "./matchmaking/queue.js";
@@ -18,6 +19,7 @@ type RequestHandlers = {
 };
 
 const requestHandlers: RequestHandlers = {
+    "lobby/subscribeList": handleLobbySubscribeList,
     "matchmaking/cancel": handleMatchmakingCancel,
     "matchmaking/list": handleMatchmakingList,
     "matchmaking/queue": handleMatchmakingQueue,

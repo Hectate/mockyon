@@ -68,7 +68,7 @@ Use at your own risk. This is intentionally not a production-ready server.
 
 3. Connect clients (local or remote) to the mock Tachyon websocket endpoint at `ws://<server-host>:8080/tachyon`.
 
-4. The vendored recoil-autohost isn't started automatically — use the **Start autohost** button on the admin panel to spawn it as a child process. It authenticates with a generated OAuth2 client-credentials pair and connects back to the same `/tachyon` endpoint as regular clients. Only one autohost runs at a time; use **Stop autohost** to shut it down. Note that autohost has been modified to work with Windows executables, and to permit the path to the `engines` folder to be configurable.
+4. The vendored recoil-autohost isn't started automatically — use the **Start autohost** button on the admin panel to spawn it as a child process. It authenticates with a generated OAuth2 client-credentials pair and connects back to the same `/tachyon` endpoint as regular clients. Only one autohost runs at a time; use **Stop autohost** to shut it down. Note that autohost has been modified to work with Windows executables, and to permit the path to the `engines` and `instances` folder to be configurable.
 
 ## License
 
