@@ -1,5 +1,6 @@
 import type { TachyonContext, TachyonEventFor } from "../types.js";
 import { createEvent } from "../messages.js";
+import { getConnectedClientMatchmaking } from "../../connectedClients.js";
 
 export function createSelfEvent(context: TachyonContext): TachyonEventFor<"user/self"> {
     return createEvent("user/self", {
@@ -17,7 +18,7 @@ export function createSelfEvent(context: TachyonContext): TachyonEventFor<"user/
             ignoreIds: [],
             currentLobby: null,
             clanInvites: [],
-            matchmaking: { state: "no_matchmaking" },
+            matchmaking: getConnectedClientMatchmaking(context.username) ?? { state: "no_matchmaking" },
         },
     });
 }

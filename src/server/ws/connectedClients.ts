@@ -18,10 +18,12 @@ export type ConnectedClientInfo = ConnectedClient & { matchmaking: MatchmakingSt
 type ClientEntry = ConnectedClientInfo & { socket: ClientSocket };
 
 const clients = new Map<string, ClientEntry>();
+const matchmakingStates = new Map<string, MatchmakingState>();
 
 export function registerConnectedClient(client: ConnectedClient, socket: ClientSocket): void {
     const existing = clients.get(client.username);
-    clients.set(client.username, { ...client, matchmaking: { state: "no_matchmaking" }, socket });
+    const matchmaking = matchmakingStates.get(client.username) ?? existing?.matchmaking ?? { state: "no_matchmaking" };
+    clients.set(client.username, { ...client, matchmaking, socket });
     existing?.socket.close(1000, "replaced by a new connection");
 }
 
@@ -43,10 +45,11 @@ export function getConnectedClient(username: string): ConnectedClientInfo | unde
 }
 
 export function getConnectedClientMatchmaking(username: string): MatchmakingState | undefined {
-    return clients.get(username)?.matchmaking;
+    return matchmakingStates.get(username) ?? clients.get(username)?.matchmaking;
 }
 
 export function setConnectedClientMatchmaking(username: string, matchmaking: MatchmakingState): void {
+    matchmakingStates.set(username, matchmaking);
     const client = clients.get(username);
     if (client) client.matchmaking = matchmaking;
 }
