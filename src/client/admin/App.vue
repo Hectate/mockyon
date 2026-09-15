@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
 type AutohostStatus = {
     status: "stopped" | "starting" | "running" | "stopping";
@@ -24,6 +24,24 @@ type ConnectedClient = {
     matchmaking?: MatchmakingState;
 };
 
+type LobbyStartBox = { top: number; bottom: number; left: number; right: number };
+type LobbyAllyTeamForm = { startBox: LobbyStartBox; maxTeams: number; teams: { maxPlayers: number }[] };
+type LobbyMember = { userId: string; username: string | null; allyTeam: string | null; team: string | null };
+type LobbyDefaults = { mapName: string; gameVersion: string; engineVersion: string };
+type Lobby = {
+    id: string;
+    name: string;
+    mapName: string;
+    engineVersion: string;
+    gameVersion: string;
+    allyTeamConfig: Record<string, { startBox: LobbyStartBox; maxTeams: number; teams: Record<string, { maxPlayers: number }> }>;
+    overview: { playerCount: number; maxPlayerCount: number };
+    members: LobbyMember[];
+};
+type LobbyForm = LobbyDefaults & { editingId: string | null; name: string; allyTeams: LobbyAllyTeamForm[] };
+
+const REFRESH_SECONDS = 5;
+
 const password = ref("");
 const status = ref("");
 const error = ref("");
@@ -41,7 +59,31 @@ const shutdownConfirmationOpen = ref(false);
 const foundTimeoutSeconds = ref(20);
 const matchmakingStatus = ref("");
 const matchmakingError = ref("");
+const lobbies = ref<Lobby[]>([]);
+const lobbyDefaults = ref<LobbyDefaults>({ mapName: "", gameVersion: "", engineVersion: "" });
+const lobbyStatus = ref("");
+const lobbyError = ref("");
+const lobbyFormOpen = ref(false);
+const lobbyForm = ref<LobbyForm>(emptyLobbyForm());
+const lobbyDeleteTarget = ref<Lobby | null>(null);
+const refreshCountdown = ref(REFRESH_SECONDS);
+const installedEngines = computed(() => engines.value.filter((engine) => engine.exists));
 let statusTimer: ReturnType<typeof setInterval> | undefined;
+let countdownTimer: ReturnType<typeof setInterval> | undefined;
+
+function emptyLobbyForm(): LobbyForm {
+    return {
+        editingId: null,
+        name: "",
+        mapName: "",
+        gameVersion: "",
+        engineVersion: "",
+        allyTeams: [
+            { startBox: { top: 0, bottom: 1, left: 0, right: 0.25 }, maxTeams: 1, teams: [{ maxPlayers: 1 }] },
+            { startBox: { top: 0, bottom: 1, left: 0.75, right: 1 }, maxTeams: 1, teams: [{ maxPlayers: 1 }] },
+        ],
+    };
+}
 
 function describeMatchmaking(matchmaking?: MatchmakingState): string {
     if (matchmaking?.state === "queuing") return `queuing: ${matchmaking.queues.map((queue) => queue.id).join(", ")}`;
@@ -93,22 +135,160 @@ async function loadInstalledEngines() {
     }
 }
 
+async function loadLobbies() {
+    try {
+        const response = await fetch("/api/admin/lobbies");
+        if (!response.ok) return;
+        const data = (await response.json()) as { lobbies: Lobby[]; defaults: LobbyDefaults };
+        lobbies.value = data.lobbies;
+        // Don't overwrite a field the admin is currently typing into.
+        if (!document.activeElement?.id?.startsWith("lobby-default-")) lobbyDefaults.value = data.defaults;
+    } catch {
+        /* ignore */
+    }
+}
+
+async function saveLobbyDefaults() {
+    lobbyStatus.value = "";
+    lobbyError.value = "";
+    const response = await fetch("/api/admin/lobbies/defaults", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(lobbyDefaults.value),
+    });
+    if (response.ok) lobbyStatus.value = "Lobby defaults saved.";
+    else lobbyError.value = "Lobby defaults rejected (is the engine installed?).";
+}
+
+function openCreateLobby() {
+    lobbyForm.value = { ...emptyLobbyForm(), ...lobbyDefaults.value, name: `Lobby ${lobbies.value.length + 1}` };
+    lobbyFormOpen.value = true;
+}
+
+function openEditLobby(lobby: Lobby) {
+    lobbyForm.value = {
+        editingId: lobby.id,
+        name: lobby.name,
+        mapName: lobby.mapName,
+        gameVersion: lobby.gameVersion,
+        engineVersion: lobby.engineVersion,
+        allyTeams: Object.keys(lobby.allyTeamConfig)
+            .sort()
+            .map((key) => {
+                const allyTeam = lobby.allyTeamConfig[key];
+                return {
+                    startBox: { ...allyTeam.startBox },
+                    maxTeams: allyTeam.maxTeams,
+                    teams: Object.keys(allyTeam.teams)
+                        .sort()
+                        .map((teamKey) => ({ maxPlayers: allyTeam.teams[teamKey].maxPlayers })),
+                };
+            }),
+    };
+    lobbyFormOpen.value = true;
+}
+
+function addFormAllyTeam() {
+    lobbyForm.value.allyTeams.push({ startBox: { top: 0, bottom: 1, left: 0, right: 0.25 }, maxTeams: 1, teams: [{ maxPlayers: 1 }] });
+}
+
+function removeFormAllyTeam(index: number) {
+    if (lobbyForm.value.allyTeams.length > 1) lobbyForm.value.allyTeams.splice(index, 1);
+}
+
+function addFormTeam(allyTeam: LobbyAllyTeamForm) {
+    allyTeam.teams.push({ maxPlayers: 1 });
+    allyTeam.maxTeams = Math.max(allyTeam.maxTeams, allyTeam.teams.length);
+}
+
+function removeFormTeam(allyTeam: LobbyAllyTeamForm, index: number) {
+    if (allyTeam.teams.length > 1) allyTeam.teams.splice(index, 1);
+}
+
+async function submitLobbyForm() {
+    lobbyStatus.value = "";
+    lobbyError.value = "";
+    const { editingId, ...body } = lobbyForm.value;
+    const response = await fetch(editingId ? `/api/admin/lobbies/${editingId}` : "/api/admin/lobbies", {
+        method: editingId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        lobbyError.value =
+            data.error === "invalid_engine_version" ? "That engine version is not installed." : "Lobby configuration rejected.";
+        return;
+    }
+    lobbyFormOpen.value = false;
+    lobbyStatus.value = editingId ? "Lobby updated." : "Lobby created.";
+    await loadLobbies();
+}
+
+async function deleteLobby() {
+    const target = lobbyDeleteTarget.value;
+    lobbyDeleteTarget.value = null;
+    if (!target) return;
+    lobbyStatus.value = "";
+    lobbyError.value = "";
+    const response = await fetch(`/api/admin/lobbies/${target.id}`, { method: "DELETE" });
+    if (response.ok) lobbyStatus.value = "Lobby deleted.";
+    else lobbyError.value = "Could not delete lobby.";
+    await loadLobbies();
+}
+
+async function moveMember(lobby: Lobby, member: LobbyMember, allyTeam: string) {
+    lobbyStatus.value = "";
+    lobbyError.value = "";
+    const url = `/api/admin/lobbies/${lobby.id}/members/${member.userId}/${allyTeam === "spectator" ? "spectate" : "allyTeam"}`;
+    const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ allyTeam }),
+    });
+    if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        lobbyError.value = data.error === "ally_team_full" ? "That ally team is full." : "Could not move that client.";
+    }
+    await loadLobbies();
+}
+
+async function resetLobbyList() {
+    lobbyStatus.value = "";
+    lobbyError.value = "";
+    const response = await fetch("/api/admin/lobbies/reset", { method: "POST" });
+    if (response.ok) lobbyStatus.value = "Lobby list resent to all connected clients.";
+    else lobbyError.value = "Could not reset the lobby list.";
+}
+
+function refreshAll() {
+    refreshCountdown.value = REFRESH_SECONDS;
+    void loadStatus().catch(() => (clientError.value = "Unable to load server status."));
+    void loadInstalledEngines();
+    void loadLobbies();
+}
+
 onMounted(async () => {
     const response = await fetch("/api/admin/password");
     if (response.ok) password.value = (await response.json()).password;
     try {
         await loadStatus();
         await loadInstalledEngines();
-        statusTimer = setInterval(() => {
-            void loadStatus().catch(() => (clientError.value = "Unable to load server status."));
-            void loadInstalledEngines();
-        }, 5000);
+        await loadLobbies();
+        refreshCountdown.value = REFRESH_SECONDS;
+        statusTimer = setInterval(refreshAll, REFRESH_SECONDS * 1000);
+        countdownTimer = setInterval(() => {
+            refreshCountdown.value = Math.max(0, refreshCountdown.value - 1);
+        }, 1000);
     } catch {
         clientError.value = "Unable to load server status.";
     }
 });
 
-onUnmounted(() => clearInterval(statusTimer));
+onUnmounted(() => {
+    clearInterval(statusTimer);
+    clearInterval(countdownTimer);
+});
 
 async function savePassword() {
     status.value = "";
@@ -210,6 +390,7 @@ function confirmShutdown() {
     <main class="page">
         <div class="header">
             <h1>Mockyon Admin</h1>
+            <span class="countdown">Refreshing in {{ refreshCountdown }}s</span>
             <button type="button" class="shutdown-button" @click="openShutdownConfirmation">Shut Down Server</button>
         </div>
         <p class="notice">A web interface for managing the Mockyon server.</p>
@@ -286,6 +467,71 @@ function confirmShutdown() {
             <p v-if="engineDownloadError" class="error">{{ engineDownloadError }}</p>
         </section>
 
+        <section>
+            <h2>Lobbies</h2>
+            <form class="download-form" @submit.prevent="saveLobbyDefaults">
+                <label>
+                    Default map
+                    <input id="lobby-default-map" v-model="lobbyDefaults.mapName" type="text" />
+                </label>
+                <label>
+                    Default game
+                    <input id="lobby-default-game" v-model="lobbyDefaults.gameVersion" type="text" />
+                </label>
+                <label>
+                    Default engine
+                    <select id="lobby-default-engine" v-model="lobbyDefaults.engineVersion">
+                        <option v-for="engine in installedEngines" :key="engine.version" :value="engine.version">
+                            {{ engine.version }}
+                        </option>
+                    </select>
+                </label>
+                <button type="submit">Save lobby defaults</button>
+            </form>
+            <div class="lobby-actions">
+                <button type="button" :disabled="installedEngines.length === 0" @click="openCreateLobby">Create lobby</button>
+                <button type="button" @click="resetLobbyList">Resend lobby list to all clients</button>
+            </div>
+            <p v-if="installedEngines.length === 0" class="warning">Install an engine before creating a lobby.</p>
+            <p v-if="lobbies.length === 0">No lobbies.</p>
+            <div v-for="lobby in lobbies" :key="lobby.id" class="lobby">
+                <h3>{{ lobby.name }}</h3>
+                <p class="notice">
+                    {{ lobby.mapName }} &middot; {{ lobby.gameVersion }} &middot; engine {{ lobby.engineVersion }} &middot;
+                    {{ lobby.overview.playerCount }}/{{ lobby.overview.maxPlayerCount }} players
+                </p>
+                <ul class="ally-teams">
+                    <li v-for="(allyTeam, key) in lobby.allyTeamConfig" :key="key">
+                        Ally team {{ key }}: {{ Object.keys(allyTeam.teams).length }}/{{ allyTeam.maxTeams }} teams, box [{{
+                            allyTeam.startBox.left
+                        }}, {{ allyTeam.startBox.top }}, {{ allyTeam.startBox.right }}, {{ allyTeam.startBox.bottom }}]
+                    </li>
+                </ul>
+                <p v-if="lobby.members.length === 0">No clients in this lobby.</p>
+                <ul v-else class="lobby-members">
+                    <li v-for="member in lobby.members" :key="member.userId">
+                        {{ member.username ?? member.userId }}
+                        <span class="matchmaking">{{
+                            member.allyTeam === null ? "spectating" : `ally team ${member.allyTeam}, team ${member.team}`
+                        }}</span>
+                        <select
+                            :value="member.allyTeam ?? 'spectator'"
+                            @change="moveMember(lobby, member, ($event.target as HTMLSelectElement).value)"
+                        >
+                            <option value="spectator">Spectator</option>
+                            <option v-for="key in Object.keys(lobby.allyTeamConfig)" :key="key" :value="key">Ally team {{ key }}</option>
+                        </select>
+                    </li>
+                </ul>
+                <div class="lobby-actions">
+                    <button type="button" @click="openEditLobby(lobby)">Edit</button>
+                    <button type="button" class="shutdown-button" @click="lobbyDeleteTarget = lobby">Delete</button>
+                </div>
+            </div>
+            <p v-if="lobbyStatus" class="success">{{ lobbyStatus }}</p>
+            <p v-if="lobbyError" class="error">{{ lobbyError }}</p>
+        </section>
+
         <!-- Shutdown Confirmation Dialog -->
         <div v-if="shutdownConfirmationOpen" class="modal-overlay">
             <div class="modal">
@@ -300,6 +546,80 @@ function confirmShutdown() {
                 <div class="modal-buttons">
                     <button type="button" class="cancel-button" @click="cancelShutdown">Cancel</button>
                     <button type="button" class="confirm-button" @click="confirmShutdown">Shut Down Server</button>
+                </div>
+            </div>
+        </div>
+        <div v-if="lobbyFormOpen" class="modal-overlay">
+            <div class="modal modal-wide">
+                <h2>{{ lobbyForm.editingId ? "Edit Lobby" : "Create Lobby" }}</h2>
+                <form class="download-form" @submit.prevent="submitLobbyForm">
+                    <label>
+                        Name
+                        <input v-model="lobbyForm.name" type="text" required />
+                    </label>
+                    <label>
+                        Map
+                        <input v-model="lobbyForm.mapName" type="text" required />
+                    </label>
+                    <label>
+                        Game
+                        <input v-model="lobbyForm.gameVersion" type="text" required />
+                    </label>
+                    <label>
+                        Engine
+                        <select v-model="lobbyForm.engineVersion" required>
+                            <option v-for="engine in installedEngines" :key="engine.version" :value="engine.version">
+                                {{ engine.version }}
+                            </option>
+                        </select>
+                    </label>
+                    <div v-for="(allyTeam, allyTeamIndex) in lobbyForm.allyTeams" :key="allyTeamIndex" class="ally-team-editor">
+                        <div class="lobby-actions">
+                            <strong>Ally team {{ allyTeamIndex }}</strong>
+                            <button type="button" :disabled="lobbyForm.allyTeams.length <= 1" @click="removeFormAllyTeam(allyTeamIndex)">
+                                Remove ally team
+                            </button>
+                        </div>
+                        <label>
+                            Max teams
+                            <input v-model.number="allyTeam.maxTeams" type="number" :min="allyTeam.teams.length" step="1" />
+                        </label>
+                        <div class="start-box">
+                            <label v-for="side in ['left', 'top', 'right', 'bottom'] as const" :key="side">
+                                {{ side }}
+                                <input v-model.number="allyTeam.startBox[side]" type="number" min="0" max="1" step="0.05" />
+                            </label>
+                        </div>
+                        <div v-for="(team, teamIndex) in allyTeam.teams" :key="teamIndex" class="lobby-actions">
+                            <label>
+                                Team {{ teamIndex }} max players
+                                <input v-model.number="team.maxPlayers" type="number" min="1" step="1" />
+                            </label>
+                            <button type="button" :disabled="allyTeam.teams.length <= 1" @click="removeFormTeam(allyTeam, teamIndex)">
+                                Remove team
+                            </button>
+                        </div>
+                        <button type="button" @click="addFormTeam(allyTeam)">Add team</button>
+                    </div>
+                    <button type="button" @click="addFormAllyTeam">Add ally team</button>
+                    <div class="modal-buttons">
+                        <button type="button" class="cancel-button" @click="lobbyFormOpen = false">Cancel</button>
+                        <button type="submit" class="confirm-button">{{ lobbyForm.editingId ? "Save lobby" : "Create lobby" }}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div v-if="lobbyDeleteTarget" class="modal-overlay">
+            <div class="modal">
+                <h2>Delete Lobby</h2>
+                <p>
+                    Delete <strong>{{ lobbyDeleteTarget.name }}</strong
+                    >? Any clients in it will be sent a <code>lobby/left</code> event.
+                </p>
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-button" @click="lobbyDeleteTarget = null">Cancel</button>
+                    <button type="button" class="confirm-button" @click="deleteLobby">Delete lobby</button>
                 </div>
             </div>
         </div>
@@ -329,6 +649,51 @@ function confirmShutdown() {
 .matchmaking {
     color: #666;
     font-size: 0.9em;
+}
+.countdown {
+    color: #666;
+    font-size: 0.9em;
+    white-space: nowrap;
+}
+.lobby {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+.lobby h3 {
+    margin: 0;
+}
+.lobby-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0.5rem 0;
+}
+.ally-teams,
+.lobby-members {
+    list-style: none;
+    padding: 0;
+    font-size: 0.95em;
+}
+.lobby-members li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+}
+.ally-team-editor {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 0.5rem;
+}
+.start-box {
+    display: flex;
+    gap: 0.5rem;
+}
+.start-box label {
+    flex: 1;
 }
 section {
     border-top: 1px solid #ddd;
@@ -420,6 +785,7 @@ section {
     display: flex;
     justify-content: center;
     align-items: center;
+    padding: 1.5rem;
     z-index: 1000;
 }
 .modal {
@@ -427,7 +793,13 @@ section {
     border-radius: 8px;
     padding: 2rem;
     max-width: 400px;
+    max-height: 100%;
+    overflow-y: auto;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+.modal-wide {
+    width: 40rem;
+    max-width: 100%;
 }
 .modal h2 {
     margin-top: 0;
@@ -445,6 +817,10 @@ section {
     gap: 1rem;
     justify-content: flex-end;
     margin-top: 1.5rem;
+    position: sticky;
+    bottom: -2rem;
+    padding: 1rem 0;
+    background-color: white;
 }
 .cancel-button {
     padding: 0.5rem 1rem;

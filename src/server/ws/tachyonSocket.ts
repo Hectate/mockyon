@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { getUserId, validateAccessToken, type ValidatedAccess } from "../auth/store.js";
 import { broadcastToOtherConnectedClients, getConnectedClients, registerConnectedClient, unregisterConnectedClient } from "./connectedClients.js";
 import { handleAutohostConnection } from "./autohostSocket.js";
+import { createLobbyListResetEvent, leaveLobby } from "../lobbies/broadcast.js";
 import { handleRequest } from "./tachyon/dispatcher.js";
 import { createSelfEvent } from "./tachyon/user/self.js";
 import { createUserUpdatedEvent } from "./tachyon/user/updated.js";
@@ -53,6 +54,7 @@ export const tachyonSocket: FastifyPluginAsync = async (app) => {
             const cleanup = () => {
                 clearInterval(heartbeat);
                 unregisterConnectedClient(username, socket);
+                leaveLobby(context.userId);
             };
             socket.on("pong", () => {
                 isAlive = true;
@@ -69,6 +71,7 @@ export const tachyonSocket: FastifyPluginAsync = async (app) => {
             registerConnectedClient(context, socket);
             socket.send(serializeOutgoingMessage(createSelfEvent(context)));
             socket.send(serializeOutgoingMessage(createUserUpdatedEvent(existingClients)));
+            socket.send(serializeOutgoingMessage(createLobbyListResetEvent()));
             broadcastToOtherConnectedClients(username, createUserUpdatedEvent([context]));
 
             socket.on("message", (raw: RawData) => {

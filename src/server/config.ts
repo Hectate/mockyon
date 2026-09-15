@@ -41,4 +41,10 @@ export const config = {
     enginesDir: path.resolve(here, "../../engines"),
     // Per-battle autohost instance directories, kept alongside the engines directory
     instancesDir: path.resolve(here, "../../instances"),
+    // Seed assets for admin-created custom lobbies, deliberately independent of the matchmaking playlist
+    lobbyDefaults: {
+        mapName: process.env.LOBBY_DEFAULT_MAP ?? "Gods of War Remake v1.3",
+        gameVersion: process.env.LOBBY_DEFAULT_GAME ?? "Beyond All Reason test-30903-2990072",
+        engineVersion: process.env.LOBBY_DEFAULT_ENGINE ?? "2026.07.04",
+    },
 };

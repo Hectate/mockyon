@@ -1,5 +1,6 @@
 import { getConnectedClientMatchmaking, setConnectedClientMatchmaking } from "../../connectedClients.js";
 import type { MatchmakingState } from "../../connectedClients.js";
+import { getLobbyIdForUser } from "../../../lobbies/store.js";
 import type { TachyonContext, TachyonRequestFor, TachyonResponseFor } from "../types.js";
 import { recordQueued, tryFormMatches } from "./matchmaker.js";
 import { findMatchmakingPlaylist } from "./playlists.js";
@@ -13,6 +14,17 @@ export function handleMatchmakingQueue(request: TachyonRequestFor<"matchmaking/q
             commandId: "matchmaking/queue",
             status: "failed",
             reason: "invalid_queue_specified",
+        };
+    }
+
+    if (getLobbyIdForUser(context.userId)) {
+        return {
+            type: "response",
+            messageId: request.messageId,
+            commandId: "matchmaking/queue",
+            status: "failed",
+            reason: "invalid_request",
+            details: "cannot queue while in a lobby",
         };
     }
 

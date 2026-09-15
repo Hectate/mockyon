@@ -44,6 +44,10 @@ export function getConnectedClient(username: string): ConnectedClientInfo | unde
     return client && { username: client.username, userId: client.userId, matchmaking: client.matchmaking };
 }
 
+export function getConnectedClientByUserId(userId: string): ConnectedClientInfo | undefined {
+    return getConnectedClients().find((client) => client.userId === userId);
+}
+
 export function getConnectedClientMatchmaking(username: string): MatchmakingState | undefined {
     return matchmakingStates.get(username) ?? clients.get(username)?.matchmaking;
 }
@@ -63,4 +67,9 @@ export function broadcastToOtherConnectedClients(username: string, event: Tachyo
     for (const client of clients.values()) {
         if (client.username !== username) client.socket.send(message);
     }
+}
+
+export function broadcastToConnectedClients(event: TachyonEvent): void {
+    const message = serializeOutgoingMessage(event);
+    for (const client of clients.values()) client.socket.send(message);
 }

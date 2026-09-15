@@ -1,3 +1,8 @@
+import { handleLobbyJoin } from "./lobby/join.js";
+import { handleLobbyJoinAllyTeam } from "./lobby/joinAllyTeam.js";
+import { handleLobbyLeave } from "./lobby/leave.js";
+import { handleLobbySpectate } from "./lobby/spectate.js";
+import { handleLobbyStartBattle } from "./lobby/startBattle.js";
 import { handleLobbySubscribeList } from "./lobby/subscribeList.js";
 import { handleMatchmakingCancel } from "./matchmaking/cancel.js";
 import { handleMatchmakingList } from "./matchmaking/list.js";
@@ -19,6 +24,11 @@ type RequestHandlers = {
 };
 
 const requestHandlers: RequestHandlers = {
+    "lobby/join": handleLobbyJoin,
+    "lobby/joinAllyTeam": handleLobbyJoinAllyTeam,
+    "lobby/leave": handleLobbyLeave,
+    "lobby/spectate": handleLobbySpectate,
+    "lobby/startBattle": handleLobbyStartBattle,
     "lobby/subscribeList": handleLobbySubscribeList,
     "matchmaking/cancel": handleMatchmakingCancel,
     "matchmaking/list": handleMatchmakingList,
