@@ -16,13 +16,16 @@ function oauthError(reply: { code: (status: number) => { send: (body: unknown) =
 }
 
 export const oauthRoutes: FastifyPluginAsync = async (app) => {
-    app.get("/.well-known/oauth-authorization-server", async (_request, reply) => {
+    app.get("/.well-known/oauth-authorization-server", async (request, reply) => {
+        // Derive the base URL from the request itself (not a static config value) so the issuer
+        // always matches whatever host/IP the client actually used to reach the server.
+        const baseUrl = `${request.protocol}://${request.headers.host ?? config.publicUrl.replace(/^https?:\/\//, "")}`;
         reply.header("Cache-Control", "public, max-age=3600");
         return {
-            issuer: config.publicUrl,
-            authorization_endpoint: `${config.publicUrl}/oauth2/authorize`,
-            token_endpoint: `${config.publicUrl}/oauth2/token`,
-            revocation_endpoint: `${config.publicUrl}/oauth2/revoke`,
+            issuer: baseUrl,
+            authorization_endpoint: `${baseUrl}/oauth2/authorize`,
+            token_endpoint: `${baseUrl}/oauth2/token`,
+            revocation_endpoint: `${baseUrl}/oauth2/revoke`,
             response_types_supported: ["code", "token"],
             grant_types_supported: ["authorization_code", "refresh_token", "client_credentials"],
             code_challenge_methods_supported: ["S256"],
