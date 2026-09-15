@@ -1,5 +1,5 @@
 import { serializeOutgoingMessage } from "./tachyon/messages.js";
-import type { TachyonEvent, TachyonEventDataFor } from "./tachyon/types.js";
+import type { TachyonEvent, TachyonEventDataFor, TachyonUserRequest } from "./tachyon/types.js";
 
 export type MatchmakingState = TachyonEventDataFor<"user/self">["user"]["matchmaking"];
 
@@ -58,8 +58,8 @@ export function setConnectedClientMatchmaking(username: string, matchmaking: Mat
     if (client) client.matchmaking = matchmaking;
 }
 
-export function sendToConnectedClient(username: string, event: TachyonEvent): void {
-    clients.get(username)?.socket.send(serializeOutgoingMessage(event));
+export function sendToConnectedClient(username: string, message: TachyonEvent | TachyonUserRequest): void {
+    clients.get(username)?.socket.send(serializeOutgoingMessage(message));
 }
 
 export function broadcastToOtherConnectedClients(username: string, event: TachyonEvent): void {

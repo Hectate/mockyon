@@ -70,6 +70,10 @@ Use at your own risk. This is intentionally not a production-ready server.
 
 4. The vendored recoil-autohost isn't started automatically — use the **Start autohost** button on the admin panel to spawn it as a child process. It authenticates with a generated OAuth2 client-credentials pair and connects back to the same `/tachyon` endpoint as regular clients. Only one autohost runs at a time; use **Stop autohost** to shut it down. Note that autohost has been modified to work with Windows executables, and to permit the path to the `engines` and `instances` folder to be configurable.
 
+    Mockyon automatically advertises the IPv4 address selected by the operating system's default network route so clients on the LAN can connect to engine instances. On a machine with multiple network adapters, set `ENGINE_HOST_IP` to the desired advertised IPv4 address before starting Mockyon. The engine itself listens on all local IPv4 interfaces.
+
+    Battles run through `spring-dedicated`, which only forwards the lockstep protocol and does not need local game or map archives. Mockyon supplies non-zero dummy archive hashes and uses in-game start positions to keep the dedicated server on this asset-free path. Clients may report checksum differences from their locally installed archives.
+
 ## License
 
 This project is licensed under MIT; please see [LICENSE.md](LICENSE.md) for the complete text.

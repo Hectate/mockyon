@@ -18,7 +18,7 @@ import { createUnimplementedResponse } from "./messages.js";
 import type { TachyonContext, TachyonRequest, TachyonRequestCommandId, TachyonRequestFor, TachyonResponseCommandId, TachyonResponseFor, TachyonResponse } from "./types.js";
 
 type RequestCommandId = TachyonRequestCommandId & TachyonResponseCommandId;
-type RequestHandler<CommandId extends RequestCommandId> = (request: TachyonRequestFor<CommandId>, context: TachyonContext) => TachyonResponseFor<CommandId>;
+type RequestHandler<CommandId extends RequestCommandId> = (request: TachyonRequestFor<CommandId>, context: TachyonContext) => TachyonResponseFor<CommandId> | Promise<TachyonResponseFor<CommandId>>;
 type RequestHandlers = {
     [CommandId in RequestCommandId]?: RequestHandler<CommandId>;
 };
@@ -41,7 +41,7 @@ const requestHandlers: RequestHandlers = {
     "user/unsubscribeUpdates": handleUnsubscribeUpdates,
 };
 
-export function handleRequest(request: TachyonRequest, context: TachyonContext): TachyonResponse {
-    const handler = requestHandlers[request.commandId] as ((request: TachyonRequest, context: TachyonContext) => TachyonResponse) | undefined;
-    return handler?.(request, context) ?? createUnimplementedResponse(request);
+export async function handleRequest(request: TachyonRequest, context: TachyonContext): Promise<TachyonResponse> {
+    const handler = requestHandlers[request.commandId] as ((request: TachyonRequest, context: TachyonContext) => TachyonResponse | Promise<TachyonResponse>) | undefined;
+    return (await handler?.(request, context)) ?? createUnimplementedResponse(request);
 }

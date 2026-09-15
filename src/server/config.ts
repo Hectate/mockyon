@@ -29,6 +29,7 @@ export const config = {
     initialPassword: configuredPassword ?? generatePassword(),
     passwordFromEnv: configuredPassword !== undefined,
     publicUrl: process.env.PUBLIC_URL ?? `http://${host === "0.0.0.0" ? "localhost" : host}:${port}`,
+    engineHostIP: process.env.ENGINE_HOST_IP,
     // build/server/config.js -> ../client
     publicDir: path.resolve(here, "../client"),
     // build/server/config.js -> repo root -> vendor/recoil-autohost

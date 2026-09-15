@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { createSocket } from "node:dgram";
 import { unlinkSync, writeFileSync } from "node:fs";
+import { isIPv4 } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FastifyBaseLogger } from "fastify";
@@ -30,8 +32,42 @@ function forwardOutputLines(logger: FastifyBaseLogger, chunk: Buffer): void {
     }
 }
 
-export function startAutohostProcess(logger: FastifyBaseLogger): { ok: true } | { ok: false; error: string } {
+async function detectEngineHostIP(): Promise<string> {
+    if (config.engineHostIP !== undefined) {
+        if (!isIPv4(config.engineHostIP)) throw new Error("ENGINE_HOST_IP must be a valid IPv4 address");
+        return config.engineHostIP;
+    }
+
+    return new Promise((resolve, reject) => {
+        const socket = createSocket("udp4");
+        const finish = (error?: Error) => {
+            socket.close();
+            if (error) reject(error);
+        };
+        socket.once("error", () => finish(new Error("could not detect a LAN IPv4 address; set ENGINE_HOST_IP explicitly")));
+        socket.connect(53, "1.1.1.1", () => {
+            const address = socket.address();
+            if (typeof address === "string" || !isIPv4(address.address) || address.address.startsWith("127.")) {
+                finish(new Error("could not detect a non-loopback LAN IPv4 address; set ENGINE_HOST_IP explicitly"));
+                return;
+            }
+            resolve(address.address);
+            finish();
+        });
+    });
+}
+
+export async function startAutohostProcess(logger: FastifyBaseLogger): Promise<{ ok: true } | { ok: false; error: string }> {
     if (state.status !== "stopped") return { ok: false, error: "already_running" };
+    state = { status: "starting" };
+
+    let hostingIP: string;
+    try {
+        hostingIP = await detectEngineHostIP();
+    } catch (error) {
+        state = { status: "stopped" };
+        return { ok: false, error: error instanceof Error ? error.message : "could not detect engine host IP" };
+    }
 
     exitLogger = logger;
     const clientId = `autohost-${randomBytes(6).toString("hex")}`;
@@ -46,7 +82,8 @@ export function startAutohostProcess(logger: FastifyBaseLogger): { ok: true } | 
         useSecureConnection: false,
         authClientId: clientId,
         authClientSecret: clientSecret,
-        hostingIP: "127.0.0.1",
+        hostingIP,
+        engineBindIP: "0.0.0.0",
         enginesPath: config.enginesDir,
         instancesPath: config.instancesDir,
     };

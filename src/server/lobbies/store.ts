@@ -83,6 +83,14 @@ export function getLobbyMemberIds(id: string): string[] {
     return lobby ? [...Object.keys(lobby.players), ...Object.keys(lobby.spectators)] : [];
 }
 
+export function setLobbyCurrentBattle(id: string, currentBattle: NonNullable<LobbyState["currentBattle"]> | undefined): LobbyState | undefined {
+    const lobby = lobbies.get(id);
+    if (!lobby) return undefined;
+    if (currentBattle) lobby.currentBattle = currentBattle;
+    else delete lobby.currentBattle;
+    return lobby;
+}
+
 export function updateLobbyConfig(id: string, changes: Partial<LobbyConfigInput>): LobbyState | undefined {
     const lobby = lobbies.get(id);
     if (!lobby) return undefined;
@@ -201,7 +209,7 @@ export function toOverview(lobby: LobbyState): LobbyOverview {
         mapName: lobby.mapName,
         engineVersion: lobby.engineVersion,
         gameVersion: lobby.gameVersion,
-        currentBattle: null,
+        currentBattle: lobby.currentBattle ? { startedAt: lobby.currentBattle.startedAt } : null,
     };
 }
 

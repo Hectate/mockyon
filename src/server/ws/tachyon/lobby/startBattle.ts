@@ -1,8 +1,11 @@
-import { getLobbyIdForUser } from "../../../lobbies/store.js";
+import { buildLobbyStartScript, launchBattle, sendBattleStartRequests } from "../../../battles/launch.js";
+import { getLobby, getLobbyIdForUser } from "../../../lobbies/store.js";
 import type { TachyonContext, TachyonRequestFor, TachyonResponseFor } from "../types.js";
 
-export function handleLobbyStartBattle(request: TachyonRequestFor<"lobby/startBattle">, context: TachyonContext): TachyonResponseFor<"lobby/startBattle"> {
-    if (!getLobbyIdForUser(context.userId)) {
+export async function handleLobbyStartBattle(request: TachyonRequestFor<"lobby/startBattle">, context: TachyonContext): Promise<TachyonResponseFor<"lobby/startBattle">> {
+    const lobbyId = getLobbyIdForUser(context.userId);
+    const lobby = lobbyId ? getLobby(lobbyId) : undefined;
+    if (!lobbyId || !lobby) {
         return {
             type: "response",
             messageId: request.messageId,
@@ -12,12 +15,23 @@ export function handleLobbyStartBattle(request: TachyonRequestFor<"lobby/startBa
         };
     }
 
-    // TODO: build the autohost/start script from the lobby and hand off to the autohost.
-    return {
-        type: "response",
-        messageId: request.messageId,
-        commandId: "lobby/startBattle",
-        status: "failed",
-        reason: "command_unimplemented",
-    };
+    try {
+        const battle = await launchBattle("lobby", buildLobbyStartScript(lobby), lobbyId);
+        setImmediate(() => sendBattleStartRequests(battle));
+        return {
+            type: "response",
+            messageId: request.messageId,
+            commandId: "lobby/startBattle",
+            status: "success",
+        };
+    } catch (error) {
+        return {
+            type: "response",
+            messageId: request.messageId,
+            commandId: "lobby/startBattle",
+            status: "failed",
+            reason: "internal_error",
+            details: error instanceof Error ? error.message : "battle launch failed",
+        };
+    }
 }

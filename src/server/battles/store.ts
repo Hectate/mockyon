@@ -175,6 +175,11 @@ export function applyBattleUpdate(data: BattleUpdateData): Battle | undefined {
             break;
         case "finished":
             battle.winningAllyTeams = update.winningAllyTeams;
+            if (battle.status !== "ended") {
+                battle.status = "ended";
+                battle.endedAt = at;
+                for (const player of battle.players) player.inGame = false;
+            }
             break;
         case "player_joined": {
             const player = findPlayer(battle, update.userId);
@@ -200,6 +205,7 @@ export function applyBattleUpdate(data: BattleUpdateData): Battle | undefined {
         }
         case "engine_quit":
         case "engine_crash":
+            if (battle.status === "ended") break;
             battle.status = "ended";
             battle.endedAt = at;
             battle.endReason = update.type;

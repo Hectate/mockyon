@@ -12,9 +12,12 @@ import type {
     TachyonRequest,
     TachyonRequestCommandId,
     TachyonResponse,
+    TachyonUserResponse,
+    TachyonUserResponseCommandId,
 } from "./types.js";
 
 const requestCommandIds = new Set<string>(tachyonMeta.schema.actors.user.request.send);
+const userResponseCommandIds = new Set<string>(tachyonMeta.schema.actors.user.response.send);
 const autohostResponseCommandIds = new Set<string>(tachyonMeta.schema.actors.autohost.response.send);
 const autohostEventCommandIds = new Set<string>(tachyonMeta.schema.actors.autohost.event.send);
 
@@ -24,6 +27,10 @@ function isRequestCommandId(value: string): value is TachyonRequestCommandId {
 
 function isAutohostResponseCommandId(value: string): value is TachyonAutohostResponseCommandId {
     return autohostResponseCommandIds.has(value);
+}
+
+function isUserResponseCommandId(value: string): value is TachyonUserResponseCommandId {
+    return userResponseCommandIds.has(value);
 }
 
 function isAutohostEventCommandId(value: string): value is TachyonAutohostEventCommandId {
@@ -38,6 +45,17 @@ export function parseRequest(value: unknown): TachyonRequest | undefined {
     if (!isRequestCommandId(value.commandId)) return undefined;
 
     const validate = validator[value.commandId].request;
+    return validate(value) ? value : undefined;
+}
+
+export function parseUserResponse(value: unknown): TachyonUserResponse | undefined {
+    if (typeof value !== "object" || value === null) return undefined;
+    if (!("type" in value) || value.type !== "response" || !("commandId" in value) || typeof value.commandId !== "string") {
+        return undefined;
+    }
+    if (!isUserResponseCommandId(value.commandId)) return undefined;
+
+    const validate = validator[value.commandId].response;
     return validate(value) ? value : undefined;
 }
 

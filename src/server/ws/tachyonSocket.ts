@@ -6,7 +6,7 @@ import { createLobbyListResetEvent, leaveLobby } from "../lobbies/broadcast.js";
 import { handleRequest } from "./tachyon/dispatcher.js";
 import { createSelfEvent } from "./tachyon/user/self.js";
 import { createUserUpdatedEvent } from "./tachyon/user/updated.js";
-import { parseRequest, serializeOutgoingMessage } from "./tachyon/messages.js";
+import { parseRequest, parseUserResponse, serializeOutgoingMessage } from "./tachyon/messages.js";
 import type { RawData } from "./tachyon/types.js";
 
 declare module "fastify" {
@@ -74,7 +74,7 @@ export const tachyonSocket: FastifyPluginAsync = async (app) => {
             socket.send(serializeOutgoingMessage(createLobbyListResetEvent()));
             broadcastToOtherConnectedClients(username, createUserUpdatedEvent([context]));
 
-            socket.on("message", (raw: RawData) => {
+            socket.on("message", async (raw: RawData) => {
                 let data: unknown;
                 try {
                     data = JSON.parse(raw.toString());
@@ -85,11 +85,16 @@ export const tachyonSocket: FastifyPluginAsync = async (app) => {
 
                 const command = parseRequest(data);
                 if (!command) {
+                    const response = parseUserResponse(data);
+                    if (response) {
+                        app.log.info({ username, commandId: response.commandId, status: response.status }, "client response");
+                        return;
+                    }
                     socket.close(1008, "invalid message");
                     return;
                 }
 
-                const response = handleRequest(command, context);
+                const response = await handleRequest(command, context);
                 socket.send(serializeOutgoingMessage(response), () => {
                     if (command.commandId === "system/disconnect") socket.close(1000, "client requested disconnect");
                 });

@@ -1,3 +1,4 @@
+import { buildMatchmakingStartScript, launchBattle, sendBattleStartRequests } from "../../../battles/launch.js";
 import type { MatchmakingState } from "../../connectedClients.js";
 import { getConnectedClient, getConnectedClientMatchmaking, sendToConnectedClient, setConnectedClientMatchmaking } from "../../connectedClients.js";
 import { createEvent } from "../messages.js";
@@ -81,15 +82,34 @@ export function readyUp(username: string): boolean {
 
     setConnectedClientMatchmaking(username, { ...matchmaking, queue: { ...matchmaking.queue, hasAlreadyReadied: true } });
     match.readyCount += 1;
-    if (match.readyCount >= match.members.length) clearTimeout(match.timer);
+    const isReady = match.readyCount >= match.members.length;
+    if (isReady) {
+        clearTimeout(match.timer);
+        for (const member of match.members) {
+            matches.delete(member);
+            leaveMatchmaking(member);
+        }
+    }
 
     // Deferred so this request's success response reaches the client before the update event.
     const event = createEvent("matchmaking/foundUpdate", { readyCount: match.readyCount });
     setImmediate(() => {
         for (const member of match.members) sendToConnectedClient(member, event);
+        if (isReady) void launchReadyMatch(match);
     });
 
     return true;
+}
+
+async function launchReadyMatch(match: Match): Promise<void> {
+    try {
+        const playlist = findMatchmakingPlaylist(match.queueId);
+        if (!playlist) throw new Error(`unknown matchmaking playlist ${match.queueId}`);
+        const battle = await launchBattle("matchmaking", buildMatchmakingStartScript(match.members, playlist), match.queueId);
+        sendBattleStartRequests(battle);
+    } catch (error) {
+        console.error("failed to launch matchmaking battle", error);
+    }
 }
 
 export function cancelMatchmaking(username: string): boolean {

@@ -107,7 +107,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     });
 
     app.post("/api/admin/autohost/start", async (request, reply) => {
-        const result = startAutohostProcess(app.log);
+        const result = await startAutohostProcess(app.log);
         if (!result.ok) return reply.code(409).send({ error: result.error });
         return { ...getAutohostProcessState(), connected: isAutohostConnected() };
     });

@@ -67,6 +67,10 @@ export function diffLobby(before: LobbyState, after: LobbyState): LobbyPatch | u
         patch.spectators = spectators;
         changed = true;
     }
+    if (!equal(before.currentBattle, after.currentBattle)) {
+        patch.currentBattle = after.currentBattle ?? null;
+        changed = true;
+    }
 
     return changed ? patch : undefined;
 }
