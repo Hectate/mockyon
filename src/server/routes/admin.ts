@@ -11,7 +11,9 @@ import { getLobbyDefaults, setLobbyDefaults, type LobbyDefaults } from "../lobbi
 import {
     createLobby,
     deleteLobby,
+    deleteVoteHistoryEntry,
     getLobby,
+    getVoteExtras,
     joinAllyTeam,
     listLobbies,
     spectate,
@@ -21,7 +23,15 @@ import {
     type LobbyConfigInput,
     type LobbyState,
     type LobbyStartBox,
+    type LobbyVoteAction,
+    type LobbyVoteChoice,
+    type LobbyVoteInput,
+    type LobbyVoteOutcome,
 } from "../lobbies/store.js";
+import { changeVote, finishVote, startVote } from "../lobbies/votes.js";
+
+const VOTE_CHOICES: LobbyVoteChoice[] = ["pending", "yes", "no", "abstain"];
+const VOTE_OUTCOMES: LobbyVoteOutcome[] = ["passed", "failed", "cancelled", "timeout"];
 
 function parseStartBox(value: unknown): LobbyStartBox | undefined {
     if (typeof value !== "object" || value === null) return undefined;
@@ -60,6 +70,80 @@ function parseNonEmptyString(value: unknown): string | undefined {
     return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+function parseVoteAction(value: unknown): LobbyVoteAction | undefined {
+    if (typeof value !== "object" || value === null) return undefined;
+    const action = value as Record<string, unknown>;
+    switch (action.type) {
+        case "start":
+            return { type: "start" };
+        case "changeMap": {
+            const newMapName = parseNonEmptyString(action.newMapName);
+            return newMapName ? { type: "changeMap", newMapName } : undefined;
+        }
+        case "appointBoss": {
+            const bossId = parseNonEmptyString(action.bossId);
+            return bossId ? { type: "appointBoss", bossId } : undefined;
+        }
+        case "kickban": {
+            const userId = parseNonEmptyString(action.userId);
+            if (!userId) return undefined;
+            if (action.banUntil === undefined || action.banUntil === null) return { type: "kickban", userId };
+            const banUntil = Number(action.banUntil);
+            return Number.isFinite(banUntil) ? { type: "kickban", userId, banUntil } : undefined;
+        }
+        default:
+            return undefined;
+    }
+}
+
+function parsePositiveNumber(value: unknown): number | undefined {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+// Returns null (rather than undefined) when a supplied field is malformed, so callers can 400.
+function parseVoteInput(body: Record<string, unknown>): LobbyVoteInput | null {
+    const input: LobbyVoteInput = {};
+
+    if (body.action !== undefined) {
+        const action = parseVoteAction(body.action);
+        if (!action) return null;
+        input.action = action;
+    }
+    if (body.initiator !== undefined) {
+        const initiator = parseNonEmptyString(body.initiator);
+        if (!initiator) return null;
+        input.initiator = initiator;
+    }
+    for (const field of ["durationSeconds", "quorum", "majority"] as const) {
+        if (body[field] === undefined) continue;
+        const parsed = parsePositiveNumber(body[field]);
+        if (parsed === undefined) return null;
+        input[field] = parsed;
+    }
+    if (body.voters !== undefined) {
+        if (typeof body.voters !== "object" || body.voters === null) return null;
+        const voters: Record<string, LobbyVoteChoice> = {};
+        for (const [userId, choice] of Object.entries(body.voters as Record<string, unknown>)) {
+            if (!VOTE_CHOICES.includes(choice as LobbyVoteChoice)) return null;
+            voters[userId] = choice as LobbyVoteChoice;
+        }
+        input.voters = voters;
+    }
+    if (body.removeVoters !== undefined) {
+        if (!Array.isArray(body.removeVoters)) return null;
+        const removeVoters: string[] = [];
+        for (const userId of body.removeVoters) {
+            const parsed = parseNonEmptyString(userId);
+            if (!parsed) return null;
+            removeVoters.push(parsed);
+        }
+        input.removeVoters = removeVoters;
+    }
+
+    return input;
+}
+
 async function isEngineInstalled(version: string): Promise<boolean> {
     const engines = await listInstalledEngines(config.enginesDir);
     return engines.some((engine) => engine.version === version && engine.exists);
@@ -70,6 +154,8 @@ function describeLobby(lobby: LobbyState) {
     const withUsername = (userId: string) => ({ userId, username: getConnectedClientByUserId(userId)?.username ?? null });
     return {
         ...lobby,
+        // quorum/majority are stored outside the lobby, but the panel has to round-trip them.
+        currentVote: lobby.currentVote ? { ...lobby.currentVote, ...getVoteExtras(lobby.id) } : undefined,
         overview: toOverview(lobby),
         members: [
             ...Object.values(lobby.players).map((player) => ({ ...withUsername(player.id), allyTeam: player.allyTeam, team: player.team })),
@@ -229,6 +315,49 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         const before = snapshotLobby(id);
         if (!before) return reply.code(404).send({ error: "invalid_lobby_id" });
         if (!spectate(userId)) return reply.code(400).send({ error: "not_in_lobby" });
+        broadcastLobbyChange(before, snapshotLobby(id));
+        return { success: true };
+    });
+
+    app.post("/api/admin/lobbies/:id/vote", async (request, reply) => {
+        const { id } = request.params as { id: string };
+        if (!getLobby(id)) return reply.code(404).send({ error: "invalid_lobby_id" });
+
+        const input = parseVoteInput((request.body ?? {}) as Record<string, unknown>);
+        if (!input) return reply.code(400).send({ error: "invalid_vote" });
+
+        const vote = startVote(id, input);
+        if (!vote) return reply.code(404).send({ error: "invalid_lobby_id" });
+        return { vote };
+    });
+
+    app.put("/api/admin/lobbies/:id/vote", async (request, reply) => {
+        const { id } = request.params as { id: string };
+        if (!getLobby(id)) return reply.code(404).send({ error: "invalid_lobby_id" });
+
+        const input = parseVoteInput((request.body ?? {}) as Record<string, unknown>);
+        if (!input) return reply.code(400).send({ error: "invalid_vote" });
+
+        const vote = changeVote(id, input);
+        if (!vote) return reply.code(400).send({ error: "no_active_vote" });
+        return { vote };
+    });
+
+    app.post("/api/admin/lobbies/:id/vote/end", async (request, reply) => {
+        const { id } = request.params as { id: string };
+        if (!getLobby(id)) return reply.code(404).send({ error: "invalid_lobby_id" });
+
+        const outcome = (request.body as { outcome?: unknown } | undefined)?.outcome as LobbyVoteOutcome;
+        if (!VOTE_OUTCOMES.includes(outcome)) return reply.code(400).send({ error: "invalid_outcome" });
+        if (!finishVote(id, outcome)) return reply.code(400).send({ error: "no_active_vote" });
+        return { success: true };
+    });
+
+    app.delete("/api/admin/lobbies/:id/vote/history/:entryId", async (request, reply) => {
+        const { id, entryId } = request.params as { id: string; entryId: string };
+        const before = snapshotLobby(id);
+        if (!before) return reply.code(404).send({ error: "invalid_lobby_id" });
+        if (!deleteVoteHistoryEntry(id, entryId)) return reply.code(404).send({ error: "invalid_vote_id" });
         broadcastLobbyChange(before, snapshotLobby(id));
         return { success: true };
     });

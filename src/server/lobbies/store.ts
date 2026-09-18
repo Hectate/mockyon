@@ -21,13 +21,43 @@ export type LobbyConfigInput = {
 
 export type JoinAllyTeamResult = "ok" | "not_in_lobby" | "invalid_request" | "ally_team_full";
 
+export type LobbyVote = NonNullable<LobbyState["currentVote"]>;
+export type LobbyVoteAction = LobbyVote["action"];
+export type LobbyVoteChoice = LobbyVote["voters"][string]["vote"];
+export type LobbyVoteOutcome = NonNullable<LobbyState["voteHistory"]>[string]["outcome"];
+
+export type LobbyVoteInput = {
+    action?: LobbyVoteAction;
+    initiator?: string;
+    durationSeconds?: number;
+    quorum?: number;
+    majority?: number;
+    // Ids need not belong to a lobby member: simulated voters exist to exercise client rendering.
+    voters?: Record<string, LobbyVoteChoice>;
+    removeVoters?: string[];
+};
+
+/**
+ * `quorum`/`majority` only exist on the `lobby/updated` patch schema and the expiry timer has no
+ * place on the protocol type, so they are kept beside the lobby rather than on it.
+ */
+type VoteExtras = { quorum?: number; majority?: number; timer?: NodeJS.Timeout };
+
+const DEFAULT_VOTE_DURATION_SECONDS = 60;
+
 const lobbies = new Map<string, LobbyState>();
 // userId -> lobbyId, so membership lookups stay O(1) for the per-request guards.
 const memberLobby = new Map<string, string>();
+const voteExtras = new Map<string, VoteExtras>();
 
 // Map keys represent arrays and must sort lexicographically, so they are zero padded.
 function indexKey(index: number): string {
     return String(index).padStart(2, "0");
+}
+
+// Tachyon UnixTime is microseconds.
+function unixTimeIn(seconds: number): number {
+    return Math.round((Date.now() + seconds * 1000) * 1000);
 }
 
 function buildAllyTeamConfig(allyTeams: LobbyAllyTeamInput[]): LobbyState["allyTeamConfig"] {
@@ -120,8 +150,97 @@ export function deleteLobby(id: string): string[] | undefined {
     if (!lobby) return undefined;
     const memberIds = getLobbyMemberIds(id);
     for (const userId of memberIds) memberLobby.delete(userId);
+    clearVoteTimer(id);
+    voteExtras.delete(id);
     lobbies.delete(id);
     return memberIds;
+}
+
+export function getVoteExtras(id: string): { quorum?: number; majority?: number } {
+    const extras = voteExtras.get(id);
+    return { quorum: extras?.quorum, majority: extras?.majority };
+}
+
+function clearVoteTimer(id: string): void {
+    const extras = voteExtras.get(id);
+    if (extras?.timer) clearTimeout(extras.timer);
+    if (extras) delete extras.timer;
+}
+
+/**
+ * Arms the expiry timer for the lobby's current vote. `onExpiry` is injected so the store stays
+ * free of any dependency on the broadcast layer.
+ */
+export function armVoteTimer(id: string, onExpiry: (lobbyId: string) => void): void {
+    const lobby = lobbies.get(id);
+    clearVoteTimer(id);
+    if (!lobby?.currentVote) return;
+    const extras = voteExtras.get(id);
+    if (!extras) return;
+    const delayMs = Math.max(0, Math.round(lobby.currentVote.until / 1000 - Date.now()));
+    extras.timer = setTimeout(() => onExpiry(id), delayMs);
+}
+
+/**
+ * Mock votes are decoupled from lobby state on purpose: the voter list is a snapshot taken at
+ * creation and is never reconciled when members join or leave.
+ */
+export function createVote(id: string, input: LobbyVoteInput = {}): LobbyVote | undefined {
+    const lobby = lobbies.get(id);
+    if (!lobby) return undefined;
+
+    const memberIds = getLobbyMemberIds(id).sort();
+    const voters: LobbyVote["voters"] = {};
+    for (const userId of memberIds) voters[userId] = { vote: input.voters?.[userId] ?? "pending" };
+
+    clearVoteTimer(id);
+    lobby.currentVote = {
+        id: randomUUID(),
+        action: input.action ?? { type: "start" },
+        initiator: input.initiator ?? memberIds[0] ?? "",
+        voters,
+        until: unixTimeIn(input.durationSeconds ?? DEFAULT_VOTE_DURATION_SECONDS),
+    };
+    voteExtras.set(id, { quorum: input.quorum, majority: input.majority });
+    return lobby.currentVote;
+}
+
+export function updateVote(id: string, input: LobbyVoteInput): LobbyVote | undefined {
+    const lobby = lobbies.get(id);
+    const vote = lobby?.currentVote;
+    if (!vote) return undefined;
+
+    if (input.action !== undefined) vote.action = input.action;
+    if (input.initiator !== undefined) vote.initiator = input.initiator;
+    if (input.durationSeconds !== undefined) vote.until = unixTimeIn(input.durationSeconds);
+    for (const userId of input.removeVoters ?? []) delete vote.voters[userId];
+    for (const [userId, choice] of Object.entries(input.voters ?? {})) vote.voters[userId] = { vote: choice };
+
+    const extras = voteExtras.get(id) ?? {};
+    if (input.quorum !== undefined) extras.quorum = input.quorum;
+    if (input.majority !== undefined) extras.majority = input.majority;
+    voteExtras.set(id, extras);
+
+    return vote;
+}
+
+export function endVote(id: string, outcome: LobbyVoteOutcome): { id: string; outcome: LobbyVoteOutcome } | undefined {
+    const lobby = lobbies.get(id);
+    const vote = lobby?.currentVote;
+    if (!lobby || !vote) return undefined;
+
+    clearVoteTimer(id);
+    lobby.voteHistory = { ...lobby.voteHistory, [vote.id]: { vote: vote.action, outcome, finishedAt: unixTimeIn(0) } };
+    delete lobby.currentVote;
+    voteExtras.set(id, {});
+    return { id: vote.id, outcome };
+}
+
+export function deleteVoteHistoryEntry(id: string, entryId: string): boolean {
+    const lobby = lobbies.get(id);
+    if (!lobby?.voteHistory?.[entryId]) return false;
+    delete lobby.voteHistory[entryId];
+    return true;
 }
 
 export function addSpectator(lobbyId: string, userId: string): boolean {

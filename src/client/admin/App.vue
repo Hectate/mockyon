@@ -28,6 +28,37 @@ type LobbyStartBox = { top: number; bottom: number; left: number; right: number 
 type LobbyAllyTeamForm = { startBox: LobbyStartBox; maxTeams: number; teams: { maxPlayers: number }[] };
 type LobbyMember = { userId: string; username: string | null; allyTeam: string | null; team: string | null };
 type LobbyDefaults = { mapName: string; gameVersion: string; engineVersion: string };
+type VoteChoice = "pending" | "yes" | "no" | "abstain";
+type VoteOutcome = "passed" | "failed" | "cancelled" | "timeout";
+type VoteActionType = "start" | "changeMap" | "appointBoss" | "kickban";
+type VoteAction =
+    | { type: "start" }
+    | { type: "changeMap"; newMapName: string }
+    | { type: "appointBoss"; bossId: string }
+    | { type: "kickban"; userId: string; banUntil?: number };
+type LobbyVote = {
+    id: string;
+    action: VoteAction;
+    initiator: string;
+    voters: Record<string, { vote: VoteChoice }>;
+    until: number;
+    quorum?: number;
+    majority?: number;
+};
+type VoteHistoryEntry = { vote: VoteAction; outcome: VoteOutcome; finishedAt: number };
+type VoteForm = {
+    voteId: string;
+    actionType: VoteActionType;
+    newMapName: string;
+    bossId: string;
+    kickUserId: string;
+    initiator: string;
+    durationSeconds: number;
+    quorum: number;
+    majority: number;
+    voters: Record<string, VoteChoice>;
+    newVoterChoice: VoteChoice;
+};
 type Lobby = {
     id: string;
     name: string;
@@ -37,6 +68,8 @@ type Lobby = {
     allyTeamConfig: Record<string, { startBox: LobbyStartBox; maxTeams: number; teams: Record<string, { maxPlayers: number }> }>;
     overview: { playerCount: number; maxPlayerCount: number };
     members: LobbyMember[];
+    currentVote?: LobbyVote;
+    voteHistory?: Record<string, VoteHistoryEntry>;
 };
 type LobbyForm = LobbyDefaults & { editingId: string | null; name: string; allyTeams: LobbyAllyTeamForm[] };
 
@@ -66,6 +99,9 @@ const lobbyError = ref("");
 const lobbyFormOpen = ref(false);
 const lobbyForm = ref<LobbyForm>(emptyLobbyForm());
 const lobbyDeleteTarget = ref<Lobby | null>(null);
+const voteForms = ref<Record<string, VoteForm>>({});
+const VOTE_OUTCOMES: VoteOutcome[] = ["passed", "failed", "cancelled", "timeout"];
+const VOTE_CHOICES: VoteChoice[] = ["pending", "yes", "no", "abstain"];
 const refreshCountdown = ref(REFRESH_SECONDS);
 const installedEngines = computed(() => engines.value.filter((engine) => engine.exists));
 let statusTimer: ReturnType<typeof setInterval> | undefined;
@@ -141,11 +177,139 @@ async function loadLobbies() {
         if (!response.ok) return;
         const data = (await response.json()) as { lobbies: Lobby[]; defaults: LobbyDefaults };
         lobbies.value = data.lobbies;
+        syncVoteForms(data.lobbies);
         // Don't overwrite a field the admin is currently typing into.
         if (!document.activeElement?.id?.startsWith("lobby-default-")) lobbyDefaults.value = data.defaults;
     } catch {
         /* ignore */
     }
+}
+
+function buildVoteForm(lobby: Lobby, vote: LobbyVote): VoteForm {
+    const voters: Record<string, VoteChoice> = {};
+    for (const member of lobby.members) voters[member.userId] = vote.voters[member.userId]?.vote ?? "pending";
+    // Simulated voters aren't lobby members, so they only appear in the vote itself.
+    for (const [userId, voter] of Object.entries(vote.voters)) voters[userId] ??= voter.vote;
+    return {
+        voteId: vote.id,
+        actionType: vote.action.type,
+        newMapName: vote.action.type === "changeMap" ? vote.action.newMapName : lobby.mapName,
+        bossId: vote.action.type === "appointBoss" ? vote.action.bossId : (lobby.members[0]?.userId ?? ""),
+        kickUserId: vote.action.type === "kickban" ? vote.action.userId : (lobby.members[0]?.userId ?? ""),
+        initiator: vote.initiator,
+        durationSeconds: secondsRemaining(vote.until),
+        quorum: vote.quorum ?? 0,
+        majority: vote.majority ?? 0,
+        voters,
+        newVoterChoice: "yes",
+    };
+}
+
+function isLobbyMember(lobby: Lobby, userId: string): boolean {
+    return lobby.members.some((member) => member.userId === userId);
+}
+
+function voterLabel(lobby: Lobby, userId: string): string {
+    return lobby.members.find((member) => member.userId === userId)?.username ?? userId;
+}
+
+function addSimulatedVoter(lobby: Lobby) {
+    const form = voteForms.value[lobby.id];
+    if (!form) return;
+    let userId: string;
+    do {
+        userId = String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+    } while (userId in form.voters);
+    form.voters[userId] = form.newVoterChoice;
+}
+
+function removeVoter(lobby: Lobby, userId: string) {
+    const form = voteForms.value[lobby.id];
+    if (form) delete form.voters[userId];
+}
+
+// The 5s poll must not clobber an edit in progress, so forms are only rebuilt when the vote changes.
+function syncVoteForms(nextLobbies: Lobby[]) {
+    const forms: Record<string, VoteForm> = {};
+    for (const lobby of nextLobbies) {
+        if (!lobby.currentVote) continue;
+        const existing = voteForms.value[lobby.id];
+        forms[lobby.id] = existing?.voteId === lobby.currentVote.id ? existing : buildVoteForm(lobby, lobby.currentVote);
+    }
+    voteForms.value = forms;
+}
+
+function secondsRemaining(until: number): number {
+    return Math.max(0, Math.round(until / 1000000 - Date.now() / 1000));
+}
+
+function describeVoteAction(action: VoteAction): string {
+    switch (action.type) {
+        case "changeMap":
+            return `change map to ${action.newMapName}`;
+        case "appointBoss":
+            return `appoint boss ${action.bossId}`;
+        case "kickban":
+            return `kickban ${action.userId}`;
+        default:
+            return "start";
+    }
+}
+
+function voteFormAction(form: VoteForm): VoteAction {
+    switch (form.actionType) {
+        case "changeMap":
+            return { type: "changeMap", newMapName: form.newMapName };
+        case "appointBoss":
+            return { type: "appointBoss", bossId: form.bossId };
+        case "kickban":
+            return { type: "kickban", userId: form.kickUserId };
+        default:
+            return { type: "start" };
+    }
+}
+
+async function voteRequest(url: string, method: string, body?: unknown, successMessage?: string) {
+    lobbyStatus.value = "";
+    lobbyError.value = "";
+    const response = await fetch(url, {
+        method,
+        ...(body !== undefined && { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+    });
+    if (response.ok) lobbyStatus.value = successMessage ?? "";
+    else {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        lobbyError.value = `Vote request rejected (${data.error ?? response.status}).`;
+    }
+    await loadLobbies();
+}
+
+async function startVote(lobby: Lobby) {
+    await voteRequest(`/api/admin/lobbies/${lobby.id}/vote`, "POST", {}, "Mock vote started.");
+}
+
+async function saveVote(lobby: Lobby) {
+    const form = voteForms.value[lobby.id];
+    if (!form) return;
+    const body = {
+        action: voteFormAction(form),
+        initiator: form.initiator,
+        durationSeconds: form.durationSeconds,
+        quorum: form.quorum,
+        majority: form.majority,
+        voters: form.voters,
+        // The form holds the authoritative voter set, so anything missing from it was removed.
+        removeVoters: Object.keys(lobby.currentVote?.voters ?? {}).filter((userId) => !(userId in form.voters)),
+    };
+    await voteRequest(`/api/admin/lobbies/${lobby.id}/vote`, "PUT", body, "Vote updated.");
+}
+
+async function endVote(lobby: Lobby, outcome: VoteOutcome) {
+    await voteRequest(`/api/admin/lobbies/${lobby.id}/vote/end`, "POST", { outcome }, `Vote ended as ${outcome}.`);
+}
+
+async function deleteVoteHistoryEntry(lobby: Lobby, entryId: string) {
+    await voteRequest(`/api/admin/lobbies/${lobby.id}/vote/history/${entryId}`, "DELETE", undefined, "History entry deleted.");
 }
 
 async function saveLobbyDefaults() {
@@ -527,6 +691,116 @@ function confirmShutdown() {
                     <button type="button" @click="openEditLobby(lobby)">Edit</button>
                     <button type="button" class="shutdown-button" @click="lobbyDeleteTarget = lobby">Delete</button>
                 </div>
+
+                <h4>Mock vote</h4>
+                <p v-if="!lobby.currentVote">
+                    No active vote.
+                    <button type="button" @click="startVote(lobby)">Start mock vote</button>
+                </p>
+                <template v-else-if="voteForms[lobby.id]">
+                    <form class="download-form" @submit.prevent="saveVote(lobby)">
+                        <label>
+                            Action
+                            <select :id="`lobby-vote-${lobby.id}-action`" v-model="voteForms[lobby.id].actionType">
+                                <option value="start">Start battle</option>
+                                <option value="changeMap">Change map</option>
+                                <option value="appointBoss">Appoint boss</option>
+                                <option value="kickban">Kickban</option>
+                            </select>
+                        </label>
+                        <label v-if="voteForms[lobby.id].actionType === 'changeMap'">
+                            New map name
+                            <input :id="`lobby-vote-${lobby.id}-map`" v-model="voteForms[lobby.id].newMapName" type="text" />
+                        </label>
+                        <label v-if="voteForms[lobby.id].actionType === 'appointBoss'">
+                            Boss
+                            <select :id="`lobby-vote-${lobby.id}-boss`" v-model="voteForms[lobby.id].bossId">
+                                <option v-for="member in lobby.members" :key="member.userId" :value="member.userId">
+                                    {{ member.username ?? member.userId }}
+                                </option>
+                            </select>
+                        </label>
+                        <label v-if="voteForms[lobby.id].actionType === 'kickban'">
+                            Target
+                            <select :id="`lobby-vote-${lobby.id}-kick`" v-model="voteForms[lobby.id].kickUserId">
+                                <option v-for="member in lobby.members" :key="member.userId" :value="member.userId">
+                                    {{ member.username ?? member.userId }}
+                                </option>
+                            </select>
+                        </label>
+                        <label>
+                            Initiator
+                            <select :id="`lobby-vote-${lobby.id}-initiator`" v-model="voteForms[lobby.id].initiator">
+                                <option v-for="(choice, userId) in voteForms[lobby.id].voters" :key="userId" :value="userId">
+                                    {{ voterLabel(lobby, String(userId)) }}
+                                </option>
+                            </select>
+                        </label>
+                        <label>
+                            Seconds remaining (saving restarts the timer)
+                            <input
+                                :id="`lobby-vote-${lobby.id}-duration`"
+                                v-model.number="voteForms[lobby.id].durationSeconds"
+                                type="number"
+                                min="0"
+                            />
+                        </label>
+                        <label>
+                            Quorum
+                            <input
+                                :id="`lobby-vote-${lobby.id}-quorum`"
+                                v-model.number="voteForms[lobby.id].quorum"
+                                type="number"
+                                min="0"
+                            />
+                        </label>
+                        <label>
+                            Majority
+                            <input
+                                :id="`lobby-vote-${lobby.id}-majority`"
+                                v-model.number="voteForms[lobby.id].majority"
+                                type="number"
+                                min="0"
+                            />
+                        </label>
+                        <ul class="lobby-members">
+                            <li v-for="(choice, userId) in voteForms[lobby.id].voters" :key="userId">
+                                {{ voterLabel(lobby, String(userId)) }}
+                                <span v-if="!isLobbyMember(lobby, String(userId))" class="matchmaking">simulated</span>
+                                <select :id="`lobby-vote-${lobby.id}-voter-${userId}`" v-model="voteForms[lobby.id].voters[userId]">
+                                    <option v-for="option in VOTE_CHOICES" :key="option" :value="option">{{ option }}</option>
+                                </select>
+                                <button type="button" class="shutdown-button" @click="removeVoter(lobby, String(userId))">Remove</button>
+                            </li>
+                        </ul>
+                        <div class="lobby-actions">
+                            <select :id="`lobby-vote-${lobby.id}-new-voter`" v-model="voteForms[lobby.id].newVoterChoice">
+                                <option v-for="option in VOTE_CHOICES" :key="option" :value="option">{{ option }}</option>
+                            </select>
+                            <button type="button" @click="addSimulatedVoter(lobby)">Add simulated voter</button>
+                        </div>
+                        <button type="submit">Save vote</button>
+                    </form>
+                    <div class="lobby-actions">
+                        <button v-for="outcome in VOTE_OUTCOMES" :key="outcome" type="button" @click="endVote(lobby, outcome)">
+                            End as {{ outcome }}
+                        </button>
+                    </div>
+                </template>
+
+                <h4>Vote history</h4>
+                <p v-if="!lobby.voteHistory || Object.keys(lobby.voteHistory).length === 0">No finished votes.</p>
+                <ul v-else class="lobby-members">
+                    <li v-for="(entry, entryId) in lobby.voteHistory" :key="entryId">
+                        {{ describeVoteAction(entry.vote) }}
+                        <span class="matchmaking"
+                            >{{ entry.outcome }} &middot; {{ new Date(entry.finishedAt / 1000).toLocaleTimeString() }}</span
+                        >
+                        <button type="button" class="shutdown-button" @click="deleteVoteHistoryEntry(lobby, String(entryId))">
+                            Delete
+                        </button>
+                    </li>
+                </ul>
             </div>
             <p v-if="lobbyStatus" class="success">{{ lobbyStatus }}</p>
             <p v-if="lobbyError" class="error">{{ lobbyError }}</p>

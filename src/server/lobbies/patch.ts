@@ -1,5 +1,5 @@
 import type { TachyonEventDataFor } from "../ws/tachyon/types.js";
-import type { LobbyOverview, LobbyState } from "./store.js";
+import { getVoteExtras, type LobbyOverview, type LobbyState } from "./store.js";
 
 export type LobbyPatch = TachyonEventDataFor<"lobby/updated">;
 export type LobbyOverviewPatch = NonNullable<TachyonEventDataFor<"lobby/listUpdated">["lobbies"][string]>;
@@ -28,8 +28,8 @@ function diffKeyedMap<T>(before: Record<string, T>, after: Record<string, T>): R
 }
 
 /**
- * Votes, tags, restrictions, game options and bots are intentionally never diffed: those
- * features aren't implemented, so their state can never change.
+ * Tags, restrictions, game options and bots are intentionally never diffed: those features
+ * aren't implemented, so their state can never change.
  */
 export function diffLobby(before: LobbyState, after: LobbyState): LobbyPatch | undefined {
     const patch: LobbyPatch = { id: after.id };
@@ -69,6 +69,19 @@ export function diffLobby(before: LobbyState, after: LobbyState): LobbyPatch | u
     }
     if (!equal(before.currentBattle, after.currentBattle)) {
         patch.currentBattle = after.currentBattle ?? null;
+        changed = true;
+    }
+    if (!equal(before.currentVote, after.currentVote)) {
+        // quorum/majority have no slot in the full lobby state, so they ride along on the patch only.
+        const extras = getVoteExtras(after.id);
+        patch.currentVote = after.currentVote
+            ? { ...after.currentVote, ...(extras.quorum !== undefined && { quorum: extras.quorum }), ...(extras.majority !== undefined && { majority: extras.majority }) }
+            : null;
+        changed = true;
+    }
+    const voteHistory = diffKeyedMap(before.voteHistory ?? {}, after.voteHistory ?? {});
+    if (voteHistory) {
+        patch.voteHistory = voteHistory;
         changed = true;
     }
 
