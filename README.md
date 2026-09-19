@@ -78,6 +78,9 @@ Use at your own risk. This is intentionally not a production-ready server.
 
 6. Matchmaking is hard-coded to 1v1 in the source, but can be modified easily, and is functional. Custom lobby controls are mostly disabled for clients other than joining teams or spectating, and launching battles. All other lobby configuration should be done in the Admin panel.
 
+## Wiki Pages
+* [Custom Multiplayer Maps](https://github.com/Hectate/mockyon/wiki/Custom-Multiplayer-Maps)
+
 ## License
 
 This project is licensed under MIT; please see [LICENSE.md](LICENSE.md) for the complete text.
