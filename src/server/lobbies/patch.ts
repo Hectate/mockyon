@@ -71,18 +71,21 @@ export function diffLobby(before: LobbyState, after: LobbyState): LobbyPatch | u
         patch.currentBattle = after.currentBattle ?? null;
         changed = true;
     }
-    if (!equal(before.currentVote, after.currentVote)) {
-        // quorum/majority have no slot in the full lobby state, so they ride along on the patch only.
-        const extras = getVoteExtras(after.id);
-        patch.currentVote = after.currentVote
-            ? { ...after.currentVote, ...(extras.quorum !== undefined && { quorum: extras.quorum }), ...(extras.majority !== undefined && { majority: extras.majority }) }
-            : null;
+    const currentVoteChanged = !equal(before.currentVote, after.currentVote);
+    if (currentVoteChanged) {
         changed = true;
     }
     const voteHistory = diffKeyedMap(before.voteHistory ?? {}, after.voteHistory ?? {});
     if (voteHistory) {
         patch.voteHistory = voteHistory;
         changed = true;
+    }
+    if (currentVoteChanged || (changed && after.currentVote)) {
+        // quorum/majority have no slot in the full lobby state, so they ride along on the patch only.
+        const extras = getVoteExtras(after.id);
+        patch.currentVote = after.currentVote
+            ? { ...after.currentVote, ...(extras.quorum !== undefined && { quorum: extras.quorum }), ...(extras.majority !== undefined && { majority: extras.majority }) }
+            : null;
     }
 
     return changed ? patch : undefined;
