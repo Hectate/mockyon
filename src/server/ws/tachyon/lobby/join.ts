@@ -1,6 +1,6 @@
 import { getConnectedClientMatchmaking } from "../../connectedClients.js";
 import { broadcastLobbyChange, leaveLobby, snapshotLobby } from "../../../lobbies/broadcast.js";
-import { addSpectator, getLobby, getLobbyIdForUser, getVoteExtras } from "../../../lobbies/store.js";
+import { addSpectator, getLobby, getLobbyIdForUser } from "../../../lobbies/store.js";
 import type { TachyonContext, TachyonRequestFor, TachyonResponseFor } from "../types.js";
 
 export function handleLobbyJoin(request: TachyonRequestFor<"lobby/join">, context: TachyonContext): TachyonResponseFor<"lobby/join"> {
@@ -34,15 +34,11 @@ export function handleLobbyJoin(request: TachyonRequestFor<"lobby/join">, contex
         setImmediate(() => broadcastLobbyChange(before, after));
     }
 
-    const data = lobby.currentVote
-        ? { ...structuredClone(lobby), currentVote: { ...structuredClone(lobby.currentVote), ...getVoteExtras(lobby.id) } }
-        : structuredClone(lobby);
-
     return {
         type: "response",
         messageId: request.messageId,
         commandId: "lobby/join",
         status: "success",
-        data,
+        data: structuredClone(lobby),
     };
 }
