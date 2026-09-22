@@ -198,8 +198,8 @@ function buildVoteForm(lobby: Lobby, vote: LobbyVote): VoteForm {
         kickUserId: vote.action.type === "kickban" ? vote.action.userId : (lobby.members[0]?.userId ?? ""),
         initiator: vote.initiator,
         durationSeconds: secondsRemaining(vote.until),
-        quorum: vote.quorum ?? 0,
-        majority: vote.majority ?? 0,
+        quorum: vote.quorum ?? 6,
+        majority: vote.majority ?? 8,
         voters,
         newVoterChoice: "yes",
     };
