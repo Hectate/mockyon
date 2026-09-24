@@ -2,7 +2,7 @@ import { broadcastToConnectedClients, getConnectedClientByUserId, sendToConnecte
 import { createEvent } from "../ws/tachyon/messages.js";
 import type { TachyonEventDataFor, TachyonEventFor } from "../ws/tachyon/types.js";
 import { diffLobby, diffOverview } from "./patch.js";
-import { getLobby, getLobbyIdForUser, getLobbyMemberIds, getVoteExtras, listOverviews, removeMember, toOverview, type LobbyState, type LobbyVoteOutcome } from "./store.js";
+import { getLobby, getLobbyIdForUser, getLobbyMemberIds, listOverviews, removeMember, toOverview, type LobbyState, type LobbyVoteOutcome } from "./store.js";
 
 type LobbyListPatch = TachyonEventDataFor<"lobby/listUpdated">["lobbies"];
 
@@ -55,26 +55,6 @@ export function sendLobbyVoteEnded(lobbyId: string, voteId: string, outcome: Lob
         const client = getConnectedClientByUserId(userId);
         if (client) sendToConnectedClient(client.username, createEvent("lobby/voteEnded", { id: voteId, outcome }));
     }
-}
-
-/**
- * quorum/majority live outside the lobby state, so a change to them alone is invisible to
- * `diffLobby` and has to be pushed explicitly.
- */
-export function broadcastLobbyVote(lobbyId: string): void {
-    const lobby = getLobby(lobbyId);
-    if (!lobby?.currentVote) return;
-    const extras = getVoteExtras(lobbyId);
-    broadcastToConnectedClients(
-        createEvent("lobby/updated", {
-            id: lobbyId,
-            currentVote: {
-                ...structuredClone(lobby.currentVote),
-                ...(extras.quorum !== undefined && { quorum: extras.quorum }),
-                ...(extras.majority !== undefined && { majority: extras.majority }),
-            },
-        })
-    );
 }
 
 /**

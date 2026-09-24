@@ -46,12 +46,34 @@ type LobbyVote = {
     majority?: number;
 };
 type VoteHistoryEntry = { vote: VoteAction; outcome: VoteOutcome; finishedAt: number };
-type VoteForm = {
-    voteId: string;
+type VoteDefaults = {
+    action?: VoteAction;
+    banMinutes?: number;
+    initiator?: string;
+    durationSeconds?: number;
+    quorum?: number;
+    majority?: number;
+    fillFromTeams?: boolean;
+};
+type VoteActionFields = {
     actionType: VoteActionType;
     newMapName: string;
     bossId: string;
     kickUserId: string;
+    // Whole minutes after the vote starts; "" means kick only, so the target may rejoin.
+    banMinutes: number | "";
+};
+type VoteConfigForm = VoteActionFields & {
+    lobbyId: string;
+    // "" lets the server pick the first lobby member.
+    initiator: string;
+    durationSeconds: number;
+    quorum: number;
+    majority: number;
+    fillFromTeams: boolean;
+};
+type VoteForm = VoteActionFields & {
+    voteId: string;
     initiator: string;
     durationSeconds: number;
     quorum: number;
@@ -70,6 +92,8 @@ type Lobby = {
     members: LobbyMember[];
     currentVote?: LobbyVote;
     voteHistory?: Record<string, VoteHistoryEntry>;
+    voteDefaults: VoteDefaults;
+    voteStartedAt?: number;
 };
 type LobbyForm = LobbyDefaults & { editingId: string | null; name: string; allyTeams: LobbyAllyTeamForm[] };
 
@@ -100,6 +124,7 @@ const lobbyFormOpen = ref(false);
 const lobbyForm = ref<LobbyForm>(emptyLobbyForm());
 const lobbyDeleteTarget = ref<Lobby | null>(null);
 const voteForms = ref<Record<string, VoteForm>>({});
+const voteConfigForm = ref<VoteConfigForm | null>(null);
 const VOTE_OUTCOMES: VoteOutcome[] = ["passed", "failed", "cancelled", "timeout"];
 const VOTE_CHOICES: VoteChoice[] = ["pending", "yes", "no", "abstain"];
 const refreshCountdown = ref(REFRESH_SECONDS);
@@ -190,16 +215,16 @@ function buildVoteForm(lobby: Lobby, vote: LobbyVote): VoteForm {
     for (const member of lobby.members) voters[member.userId] = vote.voters[member.userId]?.vote ?? "pending";
     // Simulated voters aren't lobby members, so they only appear in the vote itself.
     for (const [userId, voter] of Object.entries(vote.voters)) voters[userId] ??= voter.vote;
+    const banUntil = vote.action.type === "kickban" ? vote.action.banUntil : undefined;
+    const banMinutes =
+        banUntil !== undefined && lobby.voteStartedAt !== undefined ? Math.round((banUntil - lobby.voteStartedAt) / 60000000) : "";
     return {
         voteId: vote.id,
-        actionType: vote.action.type,
-        newMapName: vote.action.type === "changeMap" ? vote.action.newMapName : lobby.mapName,
-        bossId: vote.action.type === "appointBoss" ? vote.action.bossId : (lobby.members[0]?.userId ?? ""),
-        kickUserId: vote.action.type === "kickban" ? vote.action.userId : (lobby.members[0]?.userId ?? ""),
+        ...actionFields(lobby, vote.action, banMinutes),
         initiator: vote.initiator,
         durationSeconds: secondsRemaining(vote.until),
         quorum: vote.quorum ?? 6,
-        majority: vote.majority ?? 8,
+        majority: vote.majority ?? 0.5,
         voters,
         newVoterChoice: "yes",
     };
@@ -250,13 +275,28 @@ function describeVoteAction(action: VoteAction): string {
         case "appointBoss":
             return `appoint boss ${action.bossId}`;
         case "kickban":
-            return `kickban ${action.userId}`;
+            return action.banUntil === undefined ? `kick ${action.userId} (may rejoin)` : `kickban ${action.userId}`;
         default:
             return "start";
     }
 }
 
-function voteFormAction(form: VoteForm): VoteAction {
+function actionFields(lobby: Lobby, action: VoteAction, banMinutes: number | ""): VoteActionFields {
+    return {
+        actionType: action.type,
+        newMapName: action.type === "changeMap" ? action.newMapName : lobby.mapName,
+        bossId: action.type === "appointBoss" ? action.bossId : (lobby.members[0]?.userId ?? ""),
+        kickUserId: action.type === "kickban" ? action.userId : (lobby.members[0]?.userId ?? ""),
+        banMinutes,
+    };
+}
+
+// Sent beside the action so the server can anchor the ban to the vote's start time.
+function banMinutesField(form: VoteActionFields): { banMinutes?: number } {
+    return form.actionType === "kickban" && typeof form.banMinutes === "number" ? { banMinutes: form.banMinutes } : {};
+}
+
+function voteFormAction(form: VoteActionFields): VoteAction {
     switch (form.actionType) {
         case "changeMap":
             return { type: "changeMap", newMapName: form.newMapName };
@@ -288,11 +328,52 @@ async function startVote(lobby: Lobby) {
     await voteRequest(`/api/admin/lobbies/${lobby.id}/vote`, "POST", {}, "Mock vote started.");
 }
 
+function describeVoteDefaults(lobby: Lobby): string {
+    const defaults = lobby.voteDefaults;
+    const parts = [describeVoteAction(defaults.action ?? { type: "start" })];
+    if (defaults.action?.type === "kickban") parts.push(defaults.banMinutes === undefined ? "kick only" : `ban ${defaults.banMinutes} min`);
+    parts.push(`${defaults.durationSeconds ?? 60}s`);
+    if (defaults.fillFromTeams) parts.push("filled from team slots");
+    else parts.push(`quorum ${defaults.quorum ?? 1}, majority ${defaults.majority ?? 0.5}`);
+    return parts.join(" · ");
+}
+
+function openVoteConfig(lobby: Lobby) {
+    const defaults = lobby.voteDefaults;
+    voteConfigForm.value = {
+        lobbyId: lobby.id,
+        ...actionFields(lobby, defaults.action ?? { type: "start" }, defaults.banMinutes ?? ""),
+        initiator: defaults.initiator ?? "",
+        durationSeconds: defaults.durationSeconds ?? 60,
+        quorum: defaults.quorum ?? 1,
+        majority: defaults.majority ?? 0.5,
+        fillFromTeams: defaults.fillFromTeams ?? false,
+    };
+}
+
+const voteConfigLobby = computed(() => lobbies.value.find((lobby) => lobby.id === voteConfigForm.value?.lobbyId));
+
+async function saveVoteConfig() {
+    const form = voteConfigForm.value;
+    if (!form) return;
+    const body = {
+        action: voteFormAction(form),
+        ...banMinutesField(form),
+        ...(form.initiator && { initiator: form.initiator }),
+        durationSeconds: form.durationSeconds,
+        fillFromTeams: form.fillFromTeams,
+        ...(!form.fillFromTeams && { quorum: form.quorum, majority: form.majority }),
+    };
+    voteConfigForm.value = null;
+    await voteRequest(`/api/admin/lobbies/${form.lobbyId}/vote/defaults`, "PUT", body, "Mock vote defaults saved.");
+}
+
 async function saveVote(lobby: Lobby) {
     const form = voteForms.value[lobby.id];
     if (!form) return;
     const body = {
         action: voteFormAction(form),
+        ...banMinutesField(form),
         initiator: form.initiator,
         durationSeconds: form.durationSeconds,
         quorum: form.quorum,
@@ -693,10 +774,16 @@ function confirmShutdown() {
                 </div>
 
                 <h4>Mock vote</h4>
-                <p v-if="!lobby.currentVote">
-                    No active vote.
-                    <button type="button" @click="startVote(lobby)">Start mock vote</button>
-                </p>
+                <template v-if="!lobby.currentVote">
+                    <p>
+                        No active vote.
+                        <span class="matchmaking">Default: {{ describeVoteDefaults(lobby) }}</span>
+                    </p>
+                    <div class="lobby-actions">
+                        <button type="button" @click="startVote(lobby)">Start mock vote</button>
+                        <button type="button" @click="openVoteConfig(lobby)">Configure default mock vote</button>
+                    </div>
+                </template>
                 <template v-else-if="voteForms[lobby.id]">
                     <form class="download-form" @submit.prevent="saveVote(lobby)">
                         <label>
@@ -727,6 +814,16 @@ function confirmShutdown() {
                                     {{ member.username ?? member.userId }}
                                 </option>
                             </select>
+                        </label>
+                        <label v-if="voteForms[lobby.id].actionType === 'kickban'">
+                            Ban for (minutes after vote start, blank = kick only, may rejoin)
+                            <input
+                                :id="`lobby-vote-${lobby.id}-ban-minutes`"
+                                v-model.number="voteForms[lobby.id].banMinutes"
+                                type="number"
+                                min="1"
+                                step="1"
+                            />
                         </label>
                         <label>
                             Initiator
@@ -761,6 +858,8 @@ function confirmShutdown() {
                                 v-model.number="voteForms[lobby.id].majority"
                                 type="number"
                                 min="0"
+                                max="1"
+                                step="0.01"
                             />
                         </label>
                         <ul class="lobby-members">
@@ -879,6 +978,85 @@ function confirmShutdown() {
                     <div class="modal-buttons">
                         <button type="button" class="cancel-button" @click="lobbyFormOpen = false">Cancel</button>
                         <button type="submit" class="confirm-button">{{ lobbyForm.editingId ? "Save lobby" : "Create lobby" }}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div v-if="voteConfigForm && voteConfigLobby" class="modal-overlay">
+            <div class="modal modal-wide">
+                <h2>Default Mock Vote</h2>
+                <p>Used by "Start mock vote" in {{ voteConfigLobby.name }}.</p>
+                <form class="download-form" @submit.prevent="saveVoteConfig">
+                    <label>
+                        Action
+                        <select v-model="voteConfigForm.actionType">
+                            <option value="start">Start battle</option>
+                            <option value="changeMap">Change map</option>
+                            <option value="appointBoss">Appoint boss</option>
+                            <option value="kickban">Kickban</option>
+                        </select>
+                    </label>
+                    <label v-if="voteConfigForm.actionType === 'changeMap'">
+                        New map name
+                        <input v-model="voteConfigForm.newMapName" type="text" required />
+                    </label>
+                    <label v-if="voteConfigForm.actionType === 'appointBoss'">
+                        Boss
+                        <select v-model="voteConfigForm.bossId" required>
+                            <option v-for="member in voteConfigLobby.members" :key="member.userId" :value="member.userId">
+                                {{ member.username ?? member.userId }}
+                            </option>
+                        </select>
+                    </label>
+                    <template v-if="voteConfigForm.actionType === 'kickban'">
+                        <label>
+                            Target
+                            <select v-model="voteConfigForm.kickUserId" required>
+                                <option v-for="member in voteConfigLobby.members" :key="member.userId" :value="member.userId">
+                                    {{ member.username ?? member.userId }}
+                                </option>
+                            </select>
+                        </label>
+                        <label>
+                            Ban for (minutes after vote start, blank = kick only, may rejoin)
+                            <input v-model.number="voteConfigForm.banMinutes" type="number" min="1" step="1" />
+                        </label>
+                    </template>
+                    <label>
+                        Initiator
+                        <select v-model="voteConfigForm.initiator">
+                            <option value="">First lobby member</option>
+                            <option v-for="member in voteConfigLobby.members" :key="member.userId" :value="member.userId">
+                                {{ member.username ?? member.userId }}
+                            </option>
+                        </select>
+                    </label>
+                    <label>
+                        Duration (seconds)
+                        <input v-model.number="voteConfigForm.durationSeconds" type="number" min="1" step="1" />
+                    </label>
+                    <label>
+                        <input v-model="voteConfigForm.fillFromTeams" type="checkbox" />
+                        Fill based on current team configuration
+                    </label>
+                    <p v-if="voteConfigForm.fillFromTeams" class="notice">
+                        Quorum becomes half the player slots (rounded up) and majority 0.5. Players in the lobby vote; spectators are left
+                        out, and simulated pending voters fill the remaining slots.
+                    </p>
+                    <template v-else>
+                        <label>
+                            Quorum
+                            <input v-model.number="voteConfigForm.quorum" type="number" min="0" step="1" />
+                        </label>
+                        <label>
+                            Majority
+                            <input v-model.number="voteConfigForm.majority" type="number" min="0" max="1" step="0.01" />
+                        </label>
+                    </template>
+                    <div class="modal-buttons">
+                        <button type="button" class="cancel-button" @click="voteConfigForm = null">Cancel</button>
+                        <button type="submit" class="confirm-button">Save defaults</button>
                     </div>
                 </form>
             </div>

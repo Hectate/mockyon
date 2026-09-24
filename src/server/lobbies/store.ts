@@ -32,23 +32,27 @@ export type LobbyVoteInput = {
     durationSeconds?: number;
     quorum?: number;
     majority?: number;
+    // Whole minutes after the vote started; becomes `banUntil` on a kickban action.
+    banMinutes?: number;
+    // Derives quorum/majority from the player slots and pads the voters with simulated ones.
+    fillFromTeams?: boolean;
     // Ids need not belong to a lobby member: simulated voters exist to exercise client rendering.
     voters?: Record<string, LobbyVoteChoice>;
     removeVoters?: string[];
 };
 
-/**
- * `quorum`/`majority` only exist on the `lobby/updated` patch schema and the expiry timer has no
- * place on the protocol type, so they are kept beside the lobby rather than on it.
- */
-type VoteExtras = { quorum?: number; majority?: number; timer?: NodeJS.Timeout };
-
 const DEFAULT_VOTE_DURATION_SECONDS = 60;
+const DEFAULT_VOTE_QUORUM = 1;
+// Fraction (0..1) of non-abstaining votes that must be yes.
+const DEFAULT_VOTE_MAJORITY = 0.5;
 
 const lobbies = new Map<string, LobbyState>();
 // userId -> lobbyId, so membership lookups stay O(1) for the per-request guards.
 const memberLobby = new Map<string, string>();
-const voteExtras = new Map<string, VoteExtras>();
+// The expiry timer, start time and admin defaults have no place on the protocol type, so they are kept beside the lobby.
+const voteTimers = new Map<string, NodeJS.Timeout>();
+const voteStartedAt = new Map<string, number>();
+const voteDefaults = new Map<string, LobbyVoteInput>();
 
 // Map keys represent arrays and must sort lexicographically, so they are zero padded.
 function indexKey(index: number): string {
@@ -151,20 +155,61 @@ export function deleteLobby(id: string): string[] | undefined {
     const memberIds = getLobbyMemberIds(id);
     for (const userId of memberIds) memberLobby.delete(userId);
     clearVoteTimer(id);
-    voteExtras.delete(id);
+    voteStartedAt.delete(id);
+    voteDefaults.delete(id);
     lobbies.delete(id);
     return memberIds;
 }
 
-export function getVoteExtras(id: string): { quorum?: number; majority?: number } {
-    const extras = voteExtras.get(id);
-    return { quorum: extras?.quorum, majority: extras?.majority };
+export function getVoteDefaults(id: string): LobbyVoteInput {
+    return structuredClone(voteDefaults.get(id) ?? {});
+}
+
+export function setVoteDefaults(id: string, input: LobbyVoteInput): boolean {
+    if (!lobbies.has(id)) return false;
+    voteDefaults.set(id, structuredClone(input));
+    return true;
+}
+
+export function getVoteStartedAt(id: string): number | undefined {
+    return lobbies.get(id)?.currentVote ? voteStartedAt.get(id) : undefined;
+}
+
+function countPlayerSlots(lobby: LobbyState): number {
+    let slots = 0;
+    for (const allyTeam of Object.values(lobby.allyTeamConfig)) {
+        for (const team of Object.values(allyTeam.teams)) slots += team.maxPlayers;
+    }
+    return slots;
+}
+
+// Unlike the joinable slots, a vote fill counts every team `maxTeams` allows; unlisted teams hold one player.
+function countVoteSlots(lobby: LobbyState): number {
+    let slots = 0;
+    for (const allyTeam of Object.values(lobby.allyTeamConfig)) {
+        const teams = Object.values(allyTeam.teams);
+        for (const team of teams) slots += team.maxPlayers;
+        slots += Math.max(0, allyTeam.maxTeams - teams.length);
+    }
+    return slots;
+}
+
+function withBanUntil(action: LobbyVoteAction, banMinutes: number | undefined, startedAt: number): LobbyVoteAction {
+    if (action.type !== "kickban" || banMinutes === undefined) return action;
+    return { ...action, banUntil: startedAt + banMinutes * 60 * 1000 * 1000 };
+}
+
+function simulatedVoterId(voters: LobbyVote["voters"]): string {
+    let userId: string;
+    do {
+        userId = String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+    } while (userId in voters);
+    return userId;
 }
 
 function clearVoteTimer(id: string): void {
-    const extras = voteExtras.get(id);
-    if (extras?.timer) clearTimeout(extras.timer);
-    if (extras) delete extras.timer;
+    clearTimeout(voteTimers.get(id));
+    voteTimers.delete(id);
 }
 
 /**
@@ -175,10 +220,11 @@ export function armVoteTimer(id: string, onExpiry: (lobbyId: string) => void): v
     const lobby = lobbies.get(id);
     clearVoteTimer(id);
     if (!lobby?.currentVote) return;
-    const extras = voteExtras.get(id);
-    if (!extras) return;
     const delayMs = Math.max(0, Math.round(lobby.currentVote.until / 1000 - Date.now()));
-    extras.timer = setTimeout(() => onExpiry(id), delayMs);
+    voteTimers.set(
+        id,
+        setTimeout(() => onExpiry(id), delayMs)
+    );
 }
 
 /**
@@ -189,19 +235,33 @@ export function createVote(id: string, input: LobbyVoteInput = {}): LobbyVote | 
     const lobby = lobbies.get(id);
     if (!lobby) return undefined;
 
-    const memberIds = getLobbyMemberIds(id).sort();
+    // Filling models player slots, so spectators are left out of the vote.
+    const memberIds = (input.fillFromTeams ? Object.keys(lobby.players) : getLobbyMemberIds(id)).sort();
     const voters: LobbyVote["voters"] = {};
     for (const userId of memberIds) voters[userId] = { vote: input.voters?.[userId] ?? "pending" };
 
+    let quorum = input.quorum ?? DEFAULT_VOTE_QUORUM;
+    let majority = input.majority ?? DEFAULT_VOTE_MAJORITY;
+    if (input.fillFromTeams) {
+        // Real players take the first slots; simulated voters fill whatever is left.
+        const slots = countVoteSlots(lobby);
+        while (Object.keys(voters).length < slots) voters[simulatedVoterId(voters)] = { vote: "pending" };
+        quorum = Math.ceil(slots / 2);
+        majority = 0.5;
+    }
+
     clearVoteTimer(id);
+    const startedAt = unixTimeIn(0);
+    voteStartedAt.set(id, startedAt);
     lobby.currentVote = {
         id: randomUUID(),
-        action: input.action ?? { type: "start" },
+        action: withBanUntil(input.action ?? { type: "start" }, input.banMinutes, startedAt),
         initiator: input.initiator ?? memberIds[0] ?? "",
         voters,
         until: unixTimeIn(input.durationSeconds ?? DEFAULT_VOTE_DURATION_SECONDS),
+        quorum,
+        majority,
     };
-    voteExtras.set(id, { quorum: input.quorum, majority: input.majority });
     return lobby.currentVote;
 }
 
@@ -210,16 +270,15 @@ export function updateVote(id: string, input: LobbyVoteInput): LobbyVote | undef
     const vote = lobby?.currentVote;
     if (!vote) return undefined;
 
-    if (input.action !== undefined) vote.action = input.action;
+    if (input.action !== undefined || input.banMinutes !== undefined) {
+        vote.action = withBanUntil(input.action ?? vote.action, input.banMinutes, voteStartedAt.get(id) ?? unixTimeIn(0));
+    }
     if (input.initiator !== undefined) vote.initiator = input.initiator;
     if (input.durationSeconds !== undefined) vote.until = unixTimeIn(input.durationSeconds);
+    if (input.quorum !== undefined) vote.quorum = input.quorum;
+    if (input.majority !== undefined) vote.majority = input.majority;
     for (const userId of input.removeVoters ?? []) delete vote.voters[userId];
     for (const [userId, choice] of Object.entries(input.voters ?? {})) vote.voters[userId] = { vote: choice };
-
-    const extras = voteExtras.get(id) ?? {};
-    if (input.quorum !== undefined) extras.quorum = input.quorum;
-    if (input.majority !== undefined) extras.majority = input.majority;
-    voteExtras.set(id, extras);
 
     return vote;
 }
@@ -232,7 +291,6 @@ export function endVote(id: string, outcome: LobbyVoteOutcome): { id: string; ou
     clearVoteTimer(id);
     lobby.voteHistory = { ...lobby.voteHistory, [vote.id]: { vote: vote.action, outcome, finishedAt: unixTimeIn(0) } };
     delete lobby.currentVote;
-    voteExtras.set(id, {});
     return { id: vote.id, outcome };
 }
 
@@ -315,10 +373,7 @@ export function spectate(userId: string): boolean {
 }
 
 export function toOverview(lobby: LobbyState): LobbyOverview {
-    let maxPlayerCount = 0;
-    for (const allyTeam of Object.values(lobby.allyTeamConfig)) {
-        for (const team of Object.values(allyTeam.teams)) maxPlayerCount += team.maxPlayers;
-    }
+    const maxPlayerCount = countPlayerSlots(lobby);
     return {
         id: lobby.id,
         name: lobby.name,

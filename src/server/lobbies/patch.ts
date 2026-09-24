@@ -1,5 +1,5 @@
 import type { TachyonEventDataFor } from "../ws/tachyon/types.js";
-import { getVoteExtras, type LobbyOverview, type LobbyState } from "./store.js";
+import type { LobbyOverview, LobbyState } from "./store.js";
 
 export type LobbyPatch = TachyonEventDataFor<"lobby/updated">;
 export type LobbyOverviewPatch = NonNullable<TachyonEventDataFor<"lobby/listUpdated">["lobbies"][string]>;
@@ -72,11 +72,7 @@ export function diffLobby(before: LobbyState, after: LobbyState): LobbyPatch | u
         changed = true;
     }
     if (!equal(before.currentVote, after.currentVote)) {
-        // quorum/majority have no slot in the full lobby state, so they ride along on the patch only.
-        const extras = getVoteExtras(after.id);
-        patch.currentVote = after.currentVote
-            ? { ...after.currentVote, ...(extras.quorum !== undefined && { quorum: extras.quorum }), ...(extras.majority !== undefined && { majority: extras.majority }) }
-            : null;
+        patch.currentVote = after.currentVote ?? null;
         changed = true;
     }
     const voteHistory = diffKeyedMap(before.voteHistory ?? {}, after.voteHistory ?? {});

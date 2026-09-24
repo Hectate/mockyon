@@ -1,4 +1,4 @@
-import { broadcastLobbyChange, broadcastLobbyVote, sendLobbyVoteEnded, snapshotLobby } from "./broadcast.js";
+import { broadcastLobbyChange, sendLobbyVoteEnded, snapshotLobby } from "./broadcast.js";
 import { armVoteTimer, createVote, endVote, updateVote, type LobbyVote, type LobbyVoteInput, type LobbyVoteOutcome } from "./store.js";
 
 /**
@@ -31,7 +31,6 @@ export function changeVote(lobbyId: string, input: LobbyVoteInput): LobbyVote | 
     if (!before || !vote) return undefined;
 
     if (input.durationSeconds !== undefined) armVoteTimer(lobbyId, (id) => finishVote(id, "timeout"));
-    if (input.quorum !== undefined || input.majority !== undefined) broadcastLobbyVote(lobbyId);
-    else broadcastLobbyChange(before, snapshotLobby(lobbyId));
+    broadcastLobbyChange(before, snapshotLobby(lobbyId));
     return vote;
 }

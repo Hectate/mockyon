@@ -13,8 +13,10 @@ import {
     deleteLobby,
     deleteVoteHistoryEntry,
     getLobby,
-    getVoteExtras,
+    getVoteDefaults,
+    getVoteStartedAt,
     joinAllyTeam,
+    setVoteDefaults,
     listLobbies,
     spectate,
     toOverview,
@@ -121,6 +123,16 @@ function parseVoteInput(body: Record<string, unknown>): LobbyVoteInput | null {
         if (parsed === undefined) return null;
         input[field] = parsed;
     }
+    if (input.majority !== undefined && input.majority > 1) return null;
+    if (body.banMinutes !== undefined && body.banMinutes !== null) {
+        const banMinutes = Number(body.banMinutes);
+        if (!Number.isInteger(banMinutes) || banMinutes < 1) return null;
+        input.banMinutes = banMinutes;
+    }
+    if (body.fillFromTeams !== undefined) {
+        if (typeof body.fillFromTeams !== "boolean") return null;
+        input.fillFromTeams = body.fillFromTeams;
+    }
     if (body.voters !== undefined) {
         if (typeof body.voters !== "object" || body.voters === null) return null;
         const voters: Record<string, LobbyVoteChoice> = {};
@@ -154,9 +166,9 @@ function describeLobby(lobby: LobbyState) {
     const withUsername = (userId: string) => ({ userId, username: getConnectedClientByUserId(userId)?.username ?? null });
     return {
         ...lobby,
-        // quorum/majority are stored outside the lobby, but the panel has to round-trip them.
-        currentVote: lobby.currentVote ? { ...lobby.currentVote, ...getVoteExtras(lobby.id) } : undefined,
         overview: toOverview(lobby),
+        voteDefaults: getVoteDefaults(lobby.id),
+        voteStartedAt: getVoteStartedAt(lobby.id),
         members: [
             ...Object.values(lobby.players).map((player) => ({ ...withUsername(player.id), allyTeam: player.allyTeam, team: player.team })),
             ...Object.values(lobby.spectators).map((spectator) => ({ ...withUsername(spectator.id), allyTeam: null, team: null })),
@@ -326,9 +338,17 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         const input = parseVoteInput((request.body ?? {}) as Record<string, unknown>);
         if (!input) return reply.code(400).send({ error: "invalid_vote" });
 
-        const vote = startVote(id, input);
+        const vote = startVote(id, { ...getVoteDefaults(id), ...input });
         if (!vote) return reply.code(404).send({ error: "invalid_lobby_id" });
         return { vote };
+    });
+
+    app.put("/api/admin/lobbies/:id/vote/defaults", async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const input = parseVoteInput((request.body ?? {}) as Record<string, unknown>);
+        if (!input) return reply.code(400).send({ error: "invalid_vote" });
+        if (!setVoteDefaults(id, input)) return reply.code(404).send({ error: "invalid_lobby_id" });
+        return { voteDefaults: getVoteDefaults(id) };
     });
 
     app.put("/api/admin/lobbies/:id/vote", async (request, reply) => {

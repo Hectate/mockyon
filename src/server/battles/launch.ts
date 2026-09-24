@@ -130,16 +130,28 @@ function createBattleEndedData(battle: Battle): TachyonEventDataFor<"battle/ende
         allyTeam.teams.flatMap((team, teamIndex) =>
             (team.players ?? []).map((player, playerIndex) => ({
                 userId: player.userId,
+                name: player.name,
                 allyTeam: String(allyTeamIndex),
                 team: String(teamIndex),
                 player: String(playerIndex),
             }))
         )
     );
+    const bots = battle.startScript.allyTeams.flatMap((allyTeam, allyTeamIndex) =>
+        allyTeam.teams.flatMap((team, teamIndex) =>
+            (team.bots ?? []).map((bot, botIndex) => ({
+                shortName: bot.aiShortName,
+                allyTeam: String(allyTeamIndex),
+                team: String(teamIndex),
+                player: String(botIndex),
+            }))
+        )
+    );
     return {
         battleId: battle.battleId,
         players,
-        spectators: (battle.startScript.spectators ?? []).map((spectator) => ({ userId: spectator.userId })),
+        bots,
+        spectators: (battle.startScript.spectators ?? []).map((spectator) => ({ userId: spectator.userId, name: spectator.name })),
         winningAllyTeamIds: (battle.winningAllyTeams ?? []).map(String),
     };
 }
