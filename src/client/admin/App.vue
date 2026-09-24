@@ -1036,7 +1036,7 @@ function confirmShutdown() {
                         Duration (seconds)
                         <input v-model.number="voteConfigForm.durationSeconds" type="number" min="1" step="1" />
                     </label>
-                    <label>
+                    <label class="checkbox-label">
                         <input v-model="voteConfigForm.fillFromTeams" type="checkbox" />
                         Fill based on current team configuration
                     </label>
@@ -1173,6 +1173,11 @@ section {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+}
+.download-form label.checkbox-label {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
 }
 .download-form input {
     padding: 0.5rem;
