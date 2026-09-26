@@ -69,6 +69,14 @@ export function broadcastToOtherConnectedClients(username: string, event: Tachyo
     }
 }
 
+export function sendToConnectedUsers(userIds: Iterable<string>, event: TachyonEvent): void {
+    const recipients = new Set(userIds);
+    const message = serializeOutgoingMessage(event);
+    for (const client of clients.values()) {
+        if (recipients.has(client.userId)) client.socket.send(message);
+    }
+}
+
 export function broadcastToConnectedClients(event: TachyonEvent): void {
     const message = serializeOutgoingMessage(event);
     for (const client of clients.values()) client.socket.send(message);
