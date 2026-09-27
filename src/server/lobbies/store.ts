@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { TachyonEventDataFor, TachyonSuccessResponseFor } from "../ws/tachyon/types.js";
+import type { TachyonEventDataFor, TachyonRequestFor, TachyonSuccessResponseFor } from "../ws/tachyon/types.js";
 
 export type LobbyState = TachyonSuccessResponseFor<"lobby/join">["data"];
 export type LobbyOverview = TachyonEventDataFor<"lobby/listReset">["lobbies"][string];
@@ -18,6 +18,12 @@ export type LobbyConfigInput = {
     engineVersion: string;
     allyTeams: LobbyAllyTeamInput[];
 };
+
+type LobbyUpdateData = TachyonRequestFor<"lobby/update">["data"];
+export type LobbyGameOptionsPatch = NonNullable<LobbyUpdateData["gameOptions"]>;
+export type LobbyRestrictionsPatch = NonNullable<LobbyUpdateData["restrictions"]>;
+export type LobbyTagsPatch = NonNullable<LobbyUpdateData["tags"]>;
+type LobbyTag = NonNullable<LobbyTagsPatch[string]>;
 
 export type JoinAllyTeamResult = "ok" | "not_in_lobby" | "invalid_request" | "ally_team_full";
 
@@ -53,6 +59,9 @@ const memberLobby = new Map<string, string>();
 const voteTimers = new Map<string, NodeJS.Timeout>();
 const voteStartedAt = new Map<string, number>();
 const voteDefaults = new Map<string, LobbyVoteInput>();
+// Restrictions and tags have no place on the full lobby state either, so late joiners never learn them.
+const lobbyRestrictions = new Map<string, Record<string, number>>();
+const lobbyTags = new Map<string, Record<string, LobbyTag>>();
 
 // Map keys represent arrays and must sort lexicographically, so they are zero padded.
 function indexKey(index: number): string {
@@ -149,6 +158,62 @@ export function updateLobbyConfig(id: string, changes: Partial<LobbyConfigInput>
     return lobby;
 }
 
+// Mirrors the admin route's ally team rules, beyond what the protocol schema already enforces.
+export function isValidAllyTeams(allyTeams: LobbyAllyTeamInput[]): boolean {
+    if (allyTeams.length < 1) return false;
+    return allyTeams.every(
+        (allyTeam) =>
+            allyTeam.teams.length >= 1 &&
+            Number.isInteger(allyTeam.maxTeams) &&
+            allyTeam.maxTeams >= allyTeam.teams.length &&
+            allyTeam.teams.every((team) => Number.isInteger(team.maxPlayers) && team.maxPlayers >= 1)
+    );
+}
+
+/**
+ * Merge applies a keyed patch in place (null removes an entry) and returns only the entries that
+ * actually changed, or undefined when nothing did.
+ */
+function applyKeyedPatch<T>(target: Record<string, T>, patch: Record<string, T | null>): Record<string, T | null> | undefined {
+    const changed: Record<string, T | null> = {};
+    let any = false;
+    for (const [key, value] of Object.entries(patch)) {
+        if (value === null) {
+            if (!(key in target)) continue;
+            delete target[key];
+        } else {
+            if (JSON.stringify(target[key]) === JSON.stringify(value)) continue;
+            target[key] = value;
+        }
+        changed[key] = value;
+        any = true;
+    }
+    return any ? changed : undefined;
+}
+
+export function applyGameOptions(id: string, patch: LobbyGameOptionsPatch): void {
+    const lobby = lobbies.get(id);
+    if (lobby) applyKeyedPatch(lobby.gameOptions, patch);
+}
+
+export function applyRestrictions(id: string, patch: LobbyRestrictionsPatch): LobbyRestrictionsPatch | undefined {
+    if (!lobbies.has(id)) return undefined;
+    const restrictions = lobbyRestrictions.get(id) ?? {};
+    lobbyRestrictions.set(id, restrictions);
+    return applyKeyedPatch(restrictions, patch);
+}
+
+export function getRestrictions(id: string): Record<string, number> {
+    return { ...lobbyRestrictions.get(id) };
+}
+
+export function applyTags(id: string, patch: LobbyTagsPatch): LobbyTagsPatch | undefined {
+    if (!lobbies.has(id)) return undefined;
+    const tags = lobbyTags.get(id) ?? {};
+    lobbyTags.set(id, tags);
+    return applyKeyedPatch(tags, patch);
+}
+
 export function deleteLobby(id: string): string[] | undefined {
     const lobby = lobbies.get(id);
     if (!lobby) return undefined;
@@ -157,6 +222,8 @@ export function deleteLobby(id: string): string[] | undefined {
     clearVoteTimer(id);
     voteStartedAt.delete(id);
     voteDefaults.delete(id);
+    lobbyRestrictions.delete(id);
+    lobbyTags.delete(id);
     lobbies.delete(id);
     return memberIds;
 }

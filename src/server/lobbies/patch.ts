@@ -28,8 +28,8 @@ function diffKeyedMap<T>(before: Record<string, T>, after: Record<string, T>): R
 }
 
 /**
- * Tags, restrictions, game options and bots are intentionally never diffed: those features
- * aren't implemented, so their state can never change.
+ * Bots are intentionally never diffed: that feature isn't implemented, so their state can never change.
+ * Tags and restrictions live outside the lobby state, so their patches are supplied by the caller.
  */
 export function diffLobby(before: LobbyState, after: LobbyState): LobbyPatch | undefined {
     const patch: LobbyPatch = { id: after.id };
@@ -52,6 +52,11 @@ export function diffLobby(before: LobbyState, after: LobbyState): LobbyPatch | u
         changed = true;
     }
 
+    const gameOptions = diffKeyedMap(before.gameOptions, after.gameOptions);
+    if (gameOptions) {
+        patch.gameOptions = gameOptions;
+        changed = true;
+    }
     const allyTeamConfig = diffKeyedMap(before.allyTeamConfig, after.allyTeamConfig);
     if (allyTeamConfig) {
         patch.allyTeamConfig = allyTeamConfig;

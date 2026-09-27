@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { FastifyBaseLogger } from "fastify";
 import { broadcastLobbyChange, snapshotLobby } from "../lobbies/broadcast.js";
-import { getLobby, setLobbyCurrentBattle, type LobbyState } from "../lobbies/store.js";
+import { getLobby, getRestrictions, setLobbyCurrentBattle, type LobbyState } from "../lobbies/store.js";
 import { getConnectedClient, getConnectedClientByUserId, sendToConnectedClient } from "../ws/connectedClients.js";
 import { requestAutohostStart } from "../ws/connectedAutohosts.js";
 import { createEvent } from "../ws/tachyon/messages.js";
@@ -46,6 +46,7 @@ export function buildLobbyStartScript(lobby: LobbyState): StartScriptWithoutId {
     const spectators = Object.keys(lobby.spectators).sort().map(participant);
     const playerCount = allyTeams.reduce((total, allyTeam) => total + allyTeam.teams.reduce((teamTotal, team) => teamTotal + (team.players?.length ?? 0), 0), 0);
     if (playerCount === 0) throw new BattleLaunchError("a battle requires at least one player");
+    const restrictions = getRestrictions(lobby.id);
 
     return {
         engineVersion: lobby.engineVersion,
@@ -57,6 +58,7 @@ export function buildLobbyStartScript(lobby: LobbyState): StartScriptWithoutId {
         allyTeams,
         spectators,
         gameOptions: Object.fromEntries(Object.entries(lobby.gameOptions).map(([key, option]) => [key, option.value])),
+        ...(Object.keys(restrictions).length > 0 && { restrictions }),
     };
 }
 

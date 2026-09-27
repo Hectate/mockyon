@@ -4,6 +4,7 @@ import { handleLobbyLeave } from "./lobby/leave.js";
 import { handleLobbySpectate } from "./lobby/spectate.js";
 import { handleLobbyStartBattle } from "./lobby/startBattle.js";
 import { handleLobbySubscribeList } from "./lobby/subscribeList.js";
+import { handleLobbyUpdate } from "./lobby/update.js";
 import { handleMatchmakingCancel } from "./matchmaking/cancel.js";
 import { handleMatchmakingList } from "./matchmaking/list.js";
 import { handleMatchmakingQueue } from "./matchmaking/queue.js";
@@ -30,6 +31,7 @@ const requestHandlers: RequestHandlers = {
     "lobby/spectate": handleLobbySpectate,
     "lobby/startBattle": handleLobbyStartBattle,
     "lobby/subscribeList": handleLobbySubscribeList,
+    "lobby/update": handleLobbyUpdate,
     "matchmaking/cancel": handleMatchmakingCancel,
     "matchmaking/list": handleMatchmakingList,
     "matchmaking/queue": handleMatchmakingQueue,

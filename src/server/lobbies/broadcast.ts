@@ -1,7 +1,7 @@
 import { broadcastToConnectedClients, getConnectedClientByUserId, sendToConnectedClient, sendToConnectedUsers } from "../ws/connectedClients.js";
 import { createEvent } from "../ws/tachyon/messages.js";
 import type { TachyonEventDataFor, TachyonEventFor } from "../ws/tachyon/types.js";
-import { diffLobby, diffOverview } from "./patch.js";
+import { diffLobby, diffOverview, type LobbyPatch } from "./patch.js";
 import { getLobby, getLobbyIdForUser, getLobbyMemberIds, listOverviews, removeMember, toOverview, type LobbyState, type LobbyVoteOutcome } from "./store.js";
 
 type LobbyListPatch = TachyonEventDataFor<"lobby/listUpdated">["lobbies"];
@@ -27,8 +27,9 @@ function broadcastListPatch(lobbies: LobbyListPatch): void {
  * Emits the `lobby/updated` and `lobby/listUpdated` deltas between two snapshots of one lobby.
  * A missing `before` means the lobby was created, a missing `after` means it was deleted.
  * `lobby/updated` only reaches current members; departed members learn from their own response or `lobby/left`.
+ * `extra` carries patch fields that can't be diffed from the snapshots, such as restrictions and tags.
  */
-export function broadcastLobbyChange(before: LobbyState | undefined, after: LobbyState | undefined): void {
+export function broadcastLobbyChange(before: LobbyState | undefined, after: LobbyState | undefined, extra?: Omit<LobbyPatch, "id">): void {
     if (!before && after) {
         broadcastListPatch({ [after.id]: toOverview(after) });
         return;
@@ -39,7 +40,8 @@ export function broadcastLobbyChange(before: LobbyState | undefined, after: Lobb
     }
     if (!before || !after) return;
 
-    const patch = diffLobby(before, after);
+    const diff = diffLobby(before, after);
+    const patch = extra && Object.keys(extra).length > 0 ? { ...diff, ...extra, id: after.id } : diff;
     if (patch) sendToConnectedUsers([...Object.keys(after.players), ...Object.keys(after.spectators)], createEvent("lobby/updated", patch));
 
     const overviewPatch = diffOverview(toOverview(before), toOverview(after));
