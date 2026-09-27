@@ -27,6 +27,16 @@ type ConnectedClient = {
 type LobbyStartBox = { top: number; bottom: number; left: number; right: number };
 type LobbyAllyTeamForm = { startBox: LobbyStartBox; maxTeams: number; teams: { maxPlayers: number }[] };
 type LobbyMember = { userId: string; username: string | null; allyTeam: string | null; team: string | null };
+type LobbyBot = {
+    id: string;
+    hostUserId: string;
+    allyTeam: string;
+    team: string;
+    player: string;
+    name?: string;
+    shortName: string;
+    version?: string;
+};
 type LobbyDefaults = { mapName: string; gameVersion: string; engineVersion: string };
 type VoteChoice = "pending" | "yes" | "no" | "abstain";
 type VoteOutcome = "passed" | "failed" | "cancelled" | "timeout";
@@ -90,6 +100,7 @@ type Lobby = {
     allyTeamConfig: Record<string, { startBox: LobbyStartBox; maxTeams: number; teams: Record<string, { maxPlayers: number }> }>;
     overview: { playerCount: number; maxPlayerCount: number };
     members: LobbyMember[];
+    bots: Record<string, LobbyBot>;
     currentVote?: LobbyVote;
     voteHistory?: Record<string, VoteHistoryEntry>;
     voteDefaults: VoteDefaults;
@@ -236,6 +247,14 @@ function isLobbyMember(lobby: Lobby, userId: string): boolean {
 
 function voterLabel(lobby: Lobby, userId: string): string {
     return lobby.members.find((member) => member.userId === userId)?.username ?? userId;
+}
+
+// Seated in slot order, so the list reads the same way the battle start script is built.
+function sortedBots(lobby: Lobby): LobbyBot[] {
+    return Object.values(lobby.bots).sort(
+        (left, right) =>
+            left.allyTeam.localeCompare(right.allyTeam) || left.team.localeCompare(right.team) || left.player.localeCompare(right.player)
+    );
 }
 
 function addSimulatedVoter(lobby: Lobby) {
@@ -766,6 +785,17 @@ function confirmShutdown() {
                             <option value="spectator">Spectator</option>
                             <option v-for="key in Object.keys(lobby.allyTeamConfig)" :key="key" :value="key">Ally team {{ key }}</option>
                         </select>
+                    </li>
+                </ul>
+                <ul v-if="Object.keys(lobby.bots).length > 0" class="lobby-members">
+                    <li v-for="bot in sortedBots(lobby)" :key="bot.id">
+                        {{ bot.name ?? bot.shortName }}
+                        <span class="matchmaking">
+                            bot<template v-if="bot.name"> ({{ bot.shortName }}{{ bot.version ? ` ${bot.version}` : "" }})</template>
+                            &middot; hosted by {{ voterLabel(lobby, bot.hostUserId) }} &middot; ally team {{ bot.allyTeam }}, team
+                            {{ bot.team }}, slot
+                            {{ bot.player }}
+                        </span>
                     </li>
                 </ul>
                 <div class="lobby-actions">

@@ -1,10 +1,13 @@
+import { handleLobbyAddBot } from "./lobby/addBot.js";
 import { handleLobbyJoin } from "./lobby/join.js";
 import { handleLobbyJoinAllyTeam } from "./lobby/joinAllyTeam.js";
 import { handleLobbyLeave } from "./lobby/leave.js";
+import { handleLobbyRemoveBot } from "./lobby/removeBot.js";
 import { handleLobbySpectate } from "./lobby/spectate.js";
 import { handleLobbyStartBattle } from "./lobby/startBattle.js";
 import { handleLobbySubscribeList } from "./lobby/subscribeList.js";
 import { handleLobbyUpdate } from "./lobby/update.js";
+import { handleLobbyUpdateBot } from "./lobby/updateBot.js";
 import { handleMatchmakingCancel } from "./matchmaking/cancel.js";
 import { handleMatchmakingList } from "./matchmaking/list.js";
 import { handleMatchmakingQueue } from "./matchmaking/queue.js";
@@ -25,13 +28,16 @@ type RequestHandlers = {
 };
 
 const requestHandlers: RequestHandlers = {
+    "lobby/addBot": handleLobbyAddBot,
     "lobby/join": handleLobbyJoin,
     "lobby/joinAllyTeam": handleLobbyJoinAllyTeam,
     "lobby/leave": handleLobbyLeave,
+    "lobby/removeBot": handleLobbyRemoveBot,
     "lobby/spectate": handleLobbySpectate,
     "lobby/startBattle": handleLobbyStartBattle,
     "lobby/subscribeList": handleLobbySubscribeList,
     "lobby/update": handleLobbyUpdate,
+    "lobby/updateBot": handleLobbyUpdateBot,
     "matchmaking/cancel": handleMatchmakingCancel,
     "matchmaking/list": handleMatchmakingList,
     "matchmaking/queue": handleMatchmakingQueue,

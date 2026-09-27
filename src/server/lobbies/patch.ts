@@ -27,8 +27,37 @@ function diffKeyedMap<T>(before: Record<string, T>, after: Record<string, T>): R
     return changed ? patch : undefined;
 }
 
+type LobbyBotPatch = NonNullable<NonNullable<LobbyPatch["bots"]>[string]>;
+
 /**
- * Bots are intentionally never diffed: that feature isn't implemented, so their state can never change.
+ * Bot entries must always carry `version` and `options`, so they get their own diff: a changed bot sends
+ * its changed fields, its current version, and its options as a nested merge patch.
+ */
+function diffBots(before: LobbyState["bots"], after: LobbyState["bots"]): Record<string, LobbyBotPatch | null> | undefined {
+    const patch: Record<string, LobbyBotPatch | null> = {};
+    let changed = false;
+    for (const [id, bot] of Object.entries(after)) {
+        const previous = before[id];
+        if (equal(previous, bot)) continue;
+        const entry: LobbyBotPatch = { id, version: bot.version ?? null, options: null };
+        for (const key of ["hostUserId", "allyTeam", "team", "player", "shortName"] as const) {
+            if (previous?.[key] !== bot[key]) entry[key] = bot[key];
+        }
+        if (previous?.name !== bot.name) entry.name = bot.name ?? null;
+        if (bot.options) entry.options = previous ? (diffKeyedMap(previous.options ?? {}, bot.options) ?? {}) : { ...bot.options };
+        patch[id] = entry;
+        changed = true;
+    }
+    for (const id of Object.keys(before)) {
+        if (!(id in after)) {
+            patch[id] = null;
+            changed = true;
+        }
+    }
+    return changed ? patch : undefined;
+}
+
+/**
  * Tags and restrictions live outside the lobby state, so their patches are supplied by the caller.
  */
 export function diffLobby(before: LobbyState, after: LobbyState): LobbyPatch | undefined {
@@ -70,6 +99,11 @@ export function diffLobby(before: LobbyState, after: LobbyState): LobbyPatch | u
     const spectators = diffKeyedMap(before.spectators, after.spectators);
     if (spectators) {
         patch.spectators = spectators;
+        changed = true;
+    }
+    const bots = diffBots(before.bots, after.bots);
+    if (bots) {
+        patch.bots = bots;
         changed = true;
     }
     if (!equal(before.currentBattle, after.currentBattle)) {

@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { FastifyBaseLogger } from "fastify";
 import { broadcastLobbyChange, snapshotLobby } from "../lobbies/broadcast.js";
-import { getLobby, getRestrictions, setLobbyCurrentBattle, type LobbyState } from "../lobbies/store.js";
+import { getLobby, getRestrictions, setLobbyCurrentBattle, type LobbyBot, type LobbyState } from "../lobbies/store.js";
 import { getConnectedClient, getConnectedClientByUserId, sendToConnectedClient } from "../ws/connectedClients.js";
 import { requestAutohostStart } from "../ws/connectedAutohosts.js";
 import { createEvent } from "../ws/tachyon/messages.js";
@@ -10,6 +10,8 @@ import type { TachyonAutohostEventDataFor, TachyonEventDataFor, TachyonUserReque
 import { applyBattleUpdate, createBattle, getBattleForUser, getBattleJoinInfo, listBattles, removeBattle, setBattleConnection, type Battle, type BattleStartScript } from "./store.js";
 
 type StartScriptWithoutId = Omit<BattleStartScript, "battleId">;
+type StartScriptTeam = BattleStartScript["allyTeams"][number]["teams"][number];
+type StartScriptBot = NonNullable<StartScriptTeam["bots"]>[number];
 
 const DUMMY_GAME_ARCHIVE_HASH = "f".repeat(128);
 const DUMMY_MAP_ARCHIVE_HASH = "d".repeat(128);
@@ -26,26 +28,36 @@ function participant(userId: string) {
     return { userId, name: client.username, password: password() };
 }
 
+function startScriptBot(bot: LobbyBot): StartScriptBot {
+    return {
+        hostUserId: bot.hostUserId,
+        aiShortName: bot.shortName,
+        ...(bot.name !== undefined && { name: bot.name }),
+        ...(bot.version !== undefined && { aiVersion: bot.version }),
+        ...(bot.options && { aiOptions: { ...bot.options } }),
+    };
+}
+
 export function buildLobbyStartScript(lobby: LobbyState): StartScriptWithoutId {
     const allyTeams = Object.entries(lobby.allyTeamConfig)
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([allyTeamKey, allyTeam]) => {
             const teams = Object.keys(allyTeam.teams)
                 .sort()
-                .map((teamKey) =>
-                    Object.values(lobby.players)
-                        .filter((player) => player.allyTeam === allyTeamKey && player.team === teamKey)
-                        .sort((left, right) => left.player.localeCompare(right.player))
-                        .map((player) => participant(player.id))
-                )
-                .filter((players) => players.length > 0)
-                .map((players) => ({ players }));
+                .map((teamKey): StartScriptTeam => {
+                    const seatedIn = <T extends { allyTeam: string; team: string; player: string }>(occupants: T[]) =>
+                        occupants.filter((occupant) => occupant.allyTeam === allyTeamKey && occupant.team === teamKey).sort((left, right) => left.player.localeCompare(right.player));
+                    const players = seatedIn(Object.values(lobby.players)).map((player) => participant(player.id));
+                    const bots = seatedIn(Object.values(lobby.bots)).map(startScriptBot);
+                    return { ...(players.length > 0 && { players }), ...(bots.length > 0 && { bots }) };
+                })
+                .filter((team) => team.players || team.bots);
             return { startBox: allyTeam.startBox, teams };
         })
         .filter((allyTeam) => allyTeam.teams.length > 0);
+    // Bot hosts are always members, so they are among the players or spectators the autohost requires.
     const spectators = Object.keys(lobby.spectators).sort().map(participant);
-    const playerCount = allyTeams.reduce((total, allyTeam) => total + allyTeam.teams.reduce((teamTotal, team) => teamTotal + (team.players?.length ?? 0), 0), 0);
-    if (playerCount === 0) throw new BattleLaunchError("a battle requires at least one player");
+    if (allyTeams.length === 0) throw new BattleLaunchError("a battle requires at least one player or bot");
     const restrictions = getRestrictions(lobby.id);
 
     return {

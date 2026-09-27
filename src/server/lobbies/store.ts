@@ -25,6 +25,11 @@ export type LobbyRestrictionsPatch = NonNullable<LobbyUpdateData["restrictions"]
 export type LobbyTagsPatch = NonNullable<LobbyUpdateData["tags"]>;
 type LobbyTag = NonNullable<LobbyTagsPatch[string]>;
 
+export type LobbyBot = LobbyState["bots"][string];
+export type LobbyAddBotInput = TachyonRequestFor<"lobby/addBot">["data"];
+export type LobbyUpdateBotInput = Omit<TachyonRequestFor<"lobby/updateBot">["data"], "id">;
+export type AddBotResult = { bot: LobbyBot } | { error: "not_in_lobby" | "invalid_request" | "ally_team_full" };
+
 export type JoinAllyTeamResult = "ok" | "not_in_lobby" | "invalid_request" | "ally_team_full";
 
 export type LobbyVote = NonNullable<LobbyState["currentVote"]>;
@@ -152,6 +157,8 @@ export function updateLobbyConfig(id: string, changes: Partial<LobbyConfigInput>
                 delete lobby.players[userId];
                 lobby.spectators[userId] = { id: userId };
             }
+            // Bots can't spectate, so they are removed outright.
+            lobby.bots = {};
         }
     }
 
@@ -385,20 +392,84 @@ export function removeMember(userId: string): string | undefined {
     if (lobby) {
         delete lobby.players[userId];
         delete lobby.spectators[userId];
+        // The autohost rejects bots whose host isn't in the battle, so a departing host takes their bots along.
+        for (const bot of Object.values(lobby.bots)) {
+            if (bot.hostUserId === userId) delete lobby.bots[bot.id];
+        }
     }
     return lobbyId;
 }
 
+// Players and bots share team slots. `excludeId` leaves out a player or bot that is moving within the lobby.
+function teamOccupants(lobby: LobbyState, allyTeam: string, team: string, excludeId?: string): { id: string; player: string }[] {
+    return [...Object.values(lobby.players), ...Object.values(lobby.bots)].filter((occupant) => occupant.allyTeam === allyTeam && occupant.team === team && occupant.id !== excludeId);
+}
+
+function findOpenTeam(lobby: LobbyState, allyTeam: string, excludeId?: string): string | undefined {
+    const allyTeamConfig = lobby.allyTeamConfig[allyTeam];
+    return Object.keys(allyTeamConfig.teams)
+        .sort()
+        .find((key) => teamOccupants(lobby, allyTeam, key, excludeId).length < allyTeamConfig.teams[key].maxPlayers);
+}
+
 function nextFreePlayerSlot(lobby: LobbyState, allyTeam: string, team: string): string {
-    const taken = new Set(
-        Object.values(lobby.players)
-            .filter((player) => player.allyTeam === allyTeam && player.team === team)
-            .map((player) => player.player)
-    );
+    const taken = new Set(teamOccupants(lobby, allyTeam, team).map((occupant) => occupant.player));
     for (let index = 0; ; index++) {
         const key = indexKey(index);
         if (!taken.has(key)) return key;
     }
+}
+
+export function addBot(hostUserId: string, input: LobbyAddBotInput): AddBotResult {
+    const lobbyId = memberLobby.get(hostUserId);
+    const lobby = lobbyId ? lobbies.get(lobbyId) : undefined;
+    if (!lobby) return { error: "not_in_lobby" };
+    if (!lobby.allyTeamConfig[input.allyTeam]) return { error: "invalid_request" };
+
+    const team = findOpenTeam(lobby, input.allyTeam);
+    if (team === undefined) return { error: "ally_team_full" };
+
+    const bot: LobbyBot = {
+        id: randomUUID(),
+        hostUserId,
+        allyTeam: input.allyTeam,
+        team,
+        player: nextFreePlayerSlot(lobby, input.allyTeam, team),
+        shortName: input.shortName,
+    };
+    if (input.name !== undefined) bot.name = input.name;
+    if (input.version !== undefined) bot.version = input.version;
+    if (input.options !== undefined && Object.keys(input.options).length > 0) bot.options = { ...input.options };
+    lobby.bots[bot.id] = bot;
+    return { bot };
+}
+
+export function getBot(lobbyId: string, botId: string): LobbyBot | undefined {
+    return lobbies.get(lobbyId)?.bots[botId];
+}
+
+export function removeBot(lobbyId: string, botId: string): boolean {
+    const lobby = lobbies.get(lobbyId);
+    if (!lobby?.bots[botId]) return false;
+    delete lobby.bots[botId];
+    return true;
+}
+
+export function updateBot(lobbyId: string, botId: string, changes: LobbyUpdateBotInput): boolean {
+    const bot = lobbies.get(lobbyId)?.bots[botId];
+    if (!bot) return false;
+
+    if (changes.name !== undefined) bot.name = changes.name;
+    if (changes.shortName !== undefined) bot.shortName = changes.shortName;
+    if (changes.version === null) delete bot.version;
+    else if (changes.version !== undefined) bot.version = changes.version;
+    if (changes.options !== undefined) {
+        const options = bot.options ?? {};
+        applyKeyedPatch(options, changes.options);
+        if (Object.keys(options).length > 0) bot.options = options;
+        else delete bot.options;
+    }
+    return true;
 }
 
 export function joinAllyTeam(userId: string, allyTeam: string): JoinAllyTeamResult {
@@ -406,15 +477,9 @@ export function joinAllyTeam(userId: string, allyTeam: string): JoinAllyTeamResu
     const lobby = lobbyId ? lobbies.get(lobbyId) : undefined;
     if (!lobby) return "not_in_lobby";
 
-    const allyTeamConfig = lobby.allyTeamConfig[allyTeam];
-    if (!allyTeamConfig) return "invalid_request";
+    if (!lobby.allyTeamConfig[allyTeam]) return "invalid_request";
 
-    const teamKey = Object.keys(allyTeamConfig.teams)
-        .sort()
-        .find((key) => {
-            const occupants = Object.values(lobby.players).filter((player) => player.allyTeam === allyTeam && player.team === key && player.id !== userId);
-            return occupants.length < allyTeamConfig.teams[key].maxPlayers;
-        });
+    const teamKey = findOpenTeam(lobby, allyTeam, userId);
     if (teamKey === undefined) return "ally_team_full";
 
     delete lobby.players[userId];
