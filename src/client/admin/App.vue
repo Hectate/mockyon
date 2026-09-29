@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 type AutohostStatus = {
     status: "stopped" | "starting" | "running" | "stopping";
@@ -107,8 +107,27 @@ type Lobby = {
     voteStartedAt?: number;
 };
 type LobbyForm = LobbyDefaults & { editingId: string | null; name: string; allyTeams: LobbyAllyTeamForm[] };
+type BattleEndedSlotKind = "client" | "mock" | "bot";
+// Every kind's fields are kept so switching kinds back and forth doesn't lose what was typed.
+type BattleEndedSlot = { kind: BattleEndedSlotKind; clientId: string; mockUserId: string; mockName: string; botShortName: string };
+type BattleEndedAllyTeam = { winner: boolean; teams: { slots: BattleEndedSlot[] }[] };
+type BattleEndedForm = {
+    // "" lets the server generate a fresh id on every send.
+    battleId: string;
+    allyTeams: BattleEndedAllyTeam[];
+    spectators: BattleEndedSlot[];
+    recipients: string[];
+};
+type BattleEndedData = {
+    battleId: string;
+    players: { userId: string; name: string; allyTeam: string; team: string; player: string }[];
+    bots: { shortName: string; allyTeam: string; team: string; player: string }[];
+    spectators: { userId: string; name: string }[];
+    winningAllyTeamIds: string[];
+};
 
 const REFRESH_SECONDS = 5;
+const BATTLE_ENDED_STORAGE_KEY = "mockyon.admin.battleEndedForm";
 
 const password = ref("");
 const status = ref("");
@@ -138,6 +157,9 @@ const voteForms = ref<Record<string, VoteForm>>({});
 const voteConfigForm = ref<VoteConfigForm | null>(null);
 const VOTE_OUTCOMES: VoteOutcome[] = ["passed", "failed", "cancelled", "timeout"];
 const VOTE_CHOICES: VoteChoice[] = ["pending", "yes", "no", "abstain"];
+const battleEndedForm = ref<BattleEndedForm>(loadBattleEndedForm());
+const battleEndedStatus = ref("");
+const battleEndedError = ref("");
 const refreshCountdown = ref(REFRESH_SECONDS);
 const installedEngines = computed(() => engines.value.filter((engine) => engine.exists));
 let statusTimer: ReturnType<typeof setInterval> | undefined;
@@ -155,6 +177,150 @@ function emptyLobbyForm(): LobbyForm {
             { startBox: { top: 0, bottom: 1, left: 0.75, right: 1 }, maxTeams: 1, teams: [{ maxPlayers: 1 }] },
         ],
     };
+}
+
+function mockUserId(): string {
+    return String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+}
+
+function emptyBattleEndedSlot(mockNumber: number): BattleEndedSlot {
+    return { kind: "mock", clientId: "", mockUserId: mockUserId(), mockName: `MockPlayer${mockNumber}`, botShortName: "BARb" };
+}
+
+function emptyBattleEndedForm(): BattleEndedForm {
+    return {
+        battleId: "",
+        allyTeams: [
+            { winner: true, teams: [{ slots: [emptyBattleEndedSlot(1)] }] },
+            { winner: false, teams: [{ slots: [emptyBattleEndedSlot(2)] }] },
+        ],
+        spectators: [],
+        recipients: [],
+    };
+}
+
+// Browser storage can be unavailable (private windows, blocked site data), so the form falls back to the 1v1 default.
+function loadBattleEndedForm(): BattleEndedForm {
+    try {
+        const stored = localStorage.getItem(BATTLE_ENDED_STORAGE_KEY);
+        if (stored) return { ...emptyBattleEndedForm(), ...(JSON.parse(stored) as Partial<BattleEndedForm>) };
+    } catch {
+        /* ignore */
+    }
+    return emptyBattleEndedForm();
+}
+
+watch(
+    battleEndedForm,
+    (form) => {
+        try {
+            localStorage.setItem(BATTLE_ENDED_STORAGE_KEY, JSON.stringify(form));
+        } catch {
+            /* ignore */
+        }
+    },
+    { deep: true }
+);
+
+function resetBattleEndedForm() {
+    battleEndedForm.value = emptyBattleEndedForm();
+    battleEndedStatus.value = "Battle ended configuration reset to 1v1.";
+    battleEndedError.value = "";
+}
+
+function battleEndedSlotCount(): number {
+    const form = battleEndedForm.value;
+    return form.allyTeams.flatMap((allyTeam) => allyTeam.teams.flatMap((team) => team.slots)).length + form.spectators.length;
+}
+
+// Grows or shrinks a list in place, keeping the entries that remain.
+function resizeList<T>(list: T[], value: string, min: number, create: () => T) {
+    const length = Math.max(min, Math.floor(Number(value)) || min);
+    if (list.length > length) list.splice(length);
+    while (list.length < length) list.push(create());
+}
+
+function resizeBattleEndedAllyTeams(value: string) {
+    resizeList(battleEndedForm.value.allyTeams, value, 1, () => ({
+        winner: false,
+        teams: [{ slots: [emptyBattleEndedSlot(battleEndedSlotCount() + 1)] }],
+    }));
+}
+
+function resizeBattleEndedTeams(allyTeam: BattleEndedAllyTeam, value: string) {
+    resizeList(allyTeam.teams, value, 1, () => ({ slots: [emptyBattleEndedSlot(battleEndedSlotCount() + 1)] }));
+}
+
+function resizeBattleEndedSlots(team: { slots: BattleEndedSlot[] }, value: string) {
+    resizeList(team.slots, value, 1, () => emptyBattleEndedSlot(battleEndedSlotCount() + 1));
+}
+
+function addBattleEndedSpectator() {
+    battleEndedForm.value.spectators.push(emptyBattleEndedSlot(battleEndedSlotCount() + 1));
+}
+
+function clientName(userId: string): string {
+    return connectedClients.value.find((client) => client.userId === userId)?.username ?? userId;
+}
+
+function isConnected(userId: string): boolean {
+    return connectedClients.value.some((client) => client.userId === userId);
+}
+
+function battleEndedUser(slot: BattleEndedSlot): { userId: string; name: string } {
+    return slot.kind === "client"
+        ? { userId: slot.clientId, name: clientName(slot.clientId) }
+        : { userId: slot.mockUserId, name: slot.mockName };
+}
+
+// Ids mirror the matchmaking battles: ally team, team and slot indices. Players and bots share a team's slots.
+const battleEndedData = computed((): BattleEndedData => {
+    const form = battleEndedForm.value;
+    const data: BattleEndedData = { battleId: form.battleId.trim(), players: [], bots: [], spectators: [], winningAllyTeamIds: [] };
+    form.allyTeams.forEach((allyTeam, allyTeamIndex) => {
+        if (allyTeam.winner) data.winningAllyTeamIds.push(String(allyTeamIndex));
+        allyTeam.teams.forEach((team, teamIndex) => {
+            team.slots.forEach((slot, slotIndex) => {
+                const seat = { allyTeam: String(allyTeamIndex), team: String(teamIndex), player: String(slotIndex) };
+                if (slot.kind === "bot") data.bots.push({ shortName: slot.botShortName, ...seat });
+                else data.players.push({ ...battleEndedUser(slot), ...seat });
+            });
+        });
+    });
+    data.spectators = form.spectators.map(battleEndedUser);
+    return data;
+});
+
+const battleEndedParticipantClients = computed(() => {
+    const data = battleEndedData.value;
+    return [...data.players, ...data.spectators].map((user) => user.userId).filter(isConnected);
+});
+
+function selectBattleEndedRecipients(userIds: string[]) {
+    battleEndedForm.value.recipients = [...new Set(userIds)];
+}
+
+async function sendBattleEnded() {
+    battleEndedStatus.value = "";
+    battleEndedError.value = "";
+    // Recipients chosen earlier may have disconnected since; they are skipped rather than failing the send.
+    const recipients = battleEndedForm.value.recipients.filter(isConnected);
+    if (recipients.length === 0) {
+        battleEndedError.value = "Select at least one connected client to send to.";
+        return;
+    }
+    const response = await fetch("/api/admin/battles/ended", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipients, event: battleEndedData.value }),
+    });
+    const data = (await response.json().catch(() => ({}))) as { error?: string; message?: string; event?: { data: BattleEndedData } };
+    if (response.ok) {
+        const names = recipients.map(clientName).join(", ");
+        battleEndedStatus.value = `battle/ended ${data.event?.data.battleId ?? ""} sent to ${names}.`;
+    } else {
+        battleEndedError.value = `battle/ended rejected (${data.error ?? response.status})${data.message ? `: ${data.message}` : "."}`;
+    }
 }
 
 function describeMatchmaking(matchmaking?: MatchmakingState): string {
@@ -935,6 +1101,135 @@ function confirmShutdown() {
             <p v-if="lobbyError" class="error">{{ lobbyError }}</p>
         </section>
 
+        <section>
+            <h2>Battle Ended Event</h2>
+            <p class="notice">
+                Real battles send <code>battle/ended</code> on their own. This sends a custom one; it need not match any battle.
+            </p>
+            <form class="download-form" @submit.prevent="sendBattleEnded">
+                <label>
+                    Battle ID (blank = random on each send)
+                    <input v-model="battleEndedForm.battleId" type="text" autocomplete="off" />
+                </label>
+                <label>
+                    Ally teams
+                    <input
+                        :value="battleEndedForm.allyTeams.length"
+                        type="number"
+                        min="1"
+                        step="1"
+                        @change="resizeBattleEndedAllyTeams(($event.target as HTMLInputElement).value)"
+                    />
+                </label>
+                <div v-for="(allyTeam, allyTeamIndex) in battleEndedForm.allyTeams" :key="allyTeamIndex" class="ally-team-editor">
+                    <div class="lobby-actions">
+                        <strong>Ally team {{ allyTeamIndex }}</strong>
+                        <label class="checkbox-label">
+                            <input v-model="allyTeam.winner" type="checkbox" />
+                            Winner
+                        </label>
+                    </div>
+                    <label>
+                        Teams
+                        <input
+                            :value="allyTeam.teams.length"
+                            type="number"
+                            min="1"
+                            step="1"
+                            @change="resizeBattleEndedTeams(allyTeam, ($event.target as HTMLInputElement).value)"
+                        />
+                    </label>
+                    <div v-for="(team, teamIndex) in allyTeam.teams" :key="teamIndex" class="battle-ended-team">
+                        <label>
+                            Team {{ teamIndex }} slots
+                            <input
+                                :value="team.slots.length"
+                                type="number"
+                                min="1"
+                                step="1"
+                                @change="resizeBattleEndedSlots(team, ($event.target as HTMLInputElement).value)"
+                            />
+                        </label>
+                        <div v-for="(slot, slotIndex) in team.slots" :key="slotIndex" class="lobby-actions">
+                            <span class="matchmaking">Slot {{ slotIndex }}</span>
+                            <select v-model="slot.kind">
+                                <option value="client">Connected client</option>
+                                <option value="mock">Mock user</option>
+                                <option value="bot">Bot</option>
+                            </select>
+                            <select v-if="slot.kind === 'client'" v-model="slot.clientId" required>
+                                <option value="" disabled>Choose a client</option>
+                                <option v-if="slot.clientId && !isConnected(slot.clientId)" :value="slot.clientId">
+                                    {{ slot.clientId }} (disconnected)
+                                </option>
+                                <option v-for="client in connectedClients" :key="client.userId" :value="client.userId">
+                                    {{ client.username }}
+                                </option>
+                            </select>
+                            <template v-else-if="slot.kind === 'mock'">
+                                <input v-model="slot.mockUserId" type="text" placeholder="User ID" required />
+                                <input v-model="slot.mockName" type="text" placeholder="Name" required />
+                            </template>
+                            <input v-else v-model="slot.botShortName" type="text" placeholder="Bot short name" required />
+                        </div>
+                    </div>
+                </div>
+
+                <strong>Spectators</strong>
+                <p v-if="battleEndedForm.spectators.length === 0" class="notice">No spectators.</p>
+                <div v-for="(spectator, spectatorIndex) in battleEndedForm.spectators" :key="spectatorIndex" class="lobby-actions">
+                    <select v-model="spectator.kind">
+                        <option value="client">Connected client</option>
+                        <option value="mock">Mock user</option>
+                    </select>
+                    <select v-if="spectator.kind === 'client'" v-model="spectator.clientId" required>
+                        <option value="" disabled>Choose a client</option>
+                        <option v-if="spectator.clientId && !isConnected(spectator.clientId)" :value="spectator.clientId">
+                            {{ spectator.clientId }} (disconnected)
+                        </option>
+                        <option v-for="client in connectedClients" :key="client.userId" :value="client.userId">
+                            {{ client.username }}
+                        </option>
+                    </select>
+                    <template v-else>
+                        <input v-model="spectator.mockUserId" type="text" placeholder="User ID" required />
+                        <input v-model="spectator.mockName" type="text" placeholder="Name" required />
+                    </template>
+                    <button type="button" class="shutdown-button" @click="battleEndedForm.spectators.splice(spectatorIndex, 1)">
+                        Remove
+                    </button>
+                </div>
+                <div class="lobby-actions">
+                    <button type="button" @click="addBattleEndedSpectator">Add spectator</button>
+                </div>
+
+                <strong>Send to</strong>
+                <p v-if="connectedClients.length === 0" class="notice">No clients connected.</p>
+                <label v-for="client in connectedClients" :key="client.userId" class="checkbox-label">
+                    <input v-model="battleEndedForm.recipients" type="checkbox" :value="client.userId" />
+                    {{ client.username }}
+                </label>
+                <div class="lobby-actions">
+                    <button type="button" @click="selectBattleEndedRecipients(connectedClients.map((client) => client.userId))">
+                        All clients
+                    </button>
+                    <button type="button" @click="selectBattleEndedRecipients(battleEndedParticipantClients)">Participating clients</button>
+                    <button type="button" @click="selectBattleEndedRecipients([])">None</button>
+                </div>
+
+                <details>
+                    <summary>Event preview</summary>
+                    <pre class="battle-ended-preview">{{ JSON.stringify(battleEndedData, null, 2) }}</pre>
+                </details>
+                <div class="lobby-actions">
+                    <button type="submit">Send battle/ended</button>
+                    <button type="button" class="shutdown-button" @click="resetBattleEndedForm">Reset to 1v1</button>
+                </div>
+            </form>
+            <p v-if="battleEndedStatus" class="success">{{ battleEndedStatus }}</p>
+            <p v-if="battleEndedError" class="error">{{ battleEndedError }}</p>
+        </section>
+
         <!-- Shutdown Confirmation Dialog -->
         <div v-if="shutdownConfirmationOpen" class="modal-overlay">
             <div class="modal">
@@ -1169,6 +1464,22 @@ function confirmShutdown() {
     border: 1px solid #ddd;
     border-radius: 4px;
     padding: 0.5rem;
+}
+.battle-ended-team {
+    border-left: 2px solid #ddd;
+    padding-left: 0.5rem;
+    margin-top: 0.5rem;
+}
+.battle-ended-team input,
+.battle-ended-team select {
+    min-width: 0;
+}
+.battle-ended-preview {
+    background-color: #f5f5f5;
+    padding: 0.5rem;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 0.85em;
 }
 .start-box {
     display: flex;

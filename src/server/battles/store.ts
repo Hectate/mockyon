@@ -26,6 +26,13 @@ export type BattlePlayer = {
     leftReason: BattleLeaveReason | null;
 };
 
+// Protocol ids for each start script slot, parallel to `startScript.allyTeams`. Lobby battles keep their
+// lobby keys here because the start script drops empty ally teams and teams, which shifts the indices.
+export type BattleSlotKeys = {
+    allyTeam: string;
+    teams: { team: string; players: string[]; bots: string[] }[];
+}[];
+
 export type BattleConnection = {
     ips: string[];
     port: number;
@@ -39,6 +46,7 @@ export type Battle = {
     queueId: string | null;
     // Sent to the autohost verbatim; the source of truth for battle settings.
     startScript: BattleStartScript;
+    slotKeys: BattleSlotKeys;
     players: BattlePlayer[];
     connection: BattleConnection | null;
     createdAt: number;
@@ -78,6 +86,7 @@ export type BattleSummary = {
 export type CreateBattleInput = {
     source: BattleSource;
     startScript: Omit<BattleStartScript, "battleId">;
+    slotKeys?: BattleSlotKeys;
     lobbyId?: string;
     queueId?: string;
 };
@@ -111,6 +120,17 @@ function collectPlayers(startScript: BattleStartScript): BattlePlayer[] {
     return players;
 }
 
+function indexSlotKeys(startScript: BattleStartScript): BattleSlotKeys {
+    return startScript.allyTeams.map((allyTeam, allyTeamIndex) => ({
+        allyTeam: String(allyTeamIndex),
+        teams: allyTeam.teams.map((team, teamIndex) => ({
+            team: String(teamIndex),
+            players: (team.players ?? []).map((_, playerIndex) => String(playerIndex)),
+            bots: (team.bots ?? []).map((_, botIndex) => String(botIndex)),
+        })),
+    }));
+}
+
 function findPlayer(battle: Battle, userId: string): BattlePlayer | undefined {
     return battle.players.find((player) => player.userId === userId);
 }
@@ -125,6 +145,7 @@ export function createBattle(input: CreateBattleInput): Battle {
         lobbyId: input.lobbyId ?? null,
         queueId: input.queueId ?? null,
         startScript,
+        slotKeys: input.slotKeys ?? indexSlotKeys(startScript),
         players: collectPlayers(startScript),
         connection: null,
         createdAt: Date.now(),

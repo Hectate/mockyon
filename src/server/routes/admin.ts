@@ -1,7 +1,10 @@
+import { randomUUID } from "node:crypto";
 import type { FastifyPluginAsync } from "fastify";
 import { getPassword, setPassword } from "../auth/password.js";
 import { getAutohostProcessState, startAutohostProcess, stopAutohostProcess } from "../autohost/process.js";
-import { getConnectedClientByUserId, getConnectedClientCount, getConnectedClients } from "../ws/connectedClients.js";
+import { getConnectedClientByUserId, getConnectedClientCount, getConnectedClients, sendToConnectedUsers } from "../ws/connectedClients.js";
+import { createEvent, serializeOutgoingMessage } from "../ws/tachyon/messages.js";
+import type { TachyonEventDataFor } from "../ws/tachyon/types.js";
 import { isAutohostConnected } from "../ws/connectedAutohosts.js";
 import { config } from "../config.js";
 import { downloadAndExtractEngine, listInstalledEngines } from "../services/engineService.js";
@@ -380,6 +383,29 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         if (!deleteVoteHistoryEntry(id, entryId)) return reply.code(404).send({ error: "invalid_vote_id" });
         broadcastLobbyChange(before, snapshotLobby(id));
         return { success: true };
+    });
+
+    // Sends an admin-built battle/ended; it need not match any real battle, so only the protocol schema is enforced.
+    app.post("/api/admin/battles/ended", async (request, reply) => {
+        const body = (request.body ?? {}) as { recipients?: unknown; event?: unknown };
+        if (!Array.isArray(body.recipients) || body.recipients.length === 0 || !body.recipients.every((userId) => typeof userId === "string")) {
+            return reply.code(400).send({ error: "invalid_recipients" });
+        }
+        const recipients = [...new Set(body.recipients as string[])];
+        const disconnected = recipients.filter((userId) => !getConnectedClientByUserId(userId));
+        if (disconnected.length > 0) return reply.code(400).send({ error: "recipients_not_connected", userIds: disconnected });
+        if (typeof body.event !== "object" || body.event === null) return reply.code(400).send({ error: "invalid_event" });
+
+        const data = { ...(body.event as TachyonEventDataFor<"battle/ended">) };
+        if (typeof data.battleId !== "string" || data.battleId.trim().length === 0) data.battleId = randomUUID();
+        const event = createEvent("battle/ended", data);
+        try {
+            serializeOutgoingMessage(event);
+        } catch (error) {
+            return reply.code(400).send({ error: "invalid_event", message: error instanceof Error ? error.message : String(error) });
+        }
+        sendToConnectedUsers(recipients, event);
+        return { success: true, event };
     });
 
     app.post("/api/admin/engines/download", async (request, reply) => {

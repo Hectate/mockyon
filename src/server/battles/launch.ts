@@ -2,12 +2,23 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { FastifyBaseLogger } from "fastify";
 import { broadcastLobbyChange, snapshotLobby } from "../lobbies/broadcast.js";
 import { getLobby, getRestrictions, setLobbyCurrentBattle, type LobbyBot, type LobbyState } from "../lobbies/store.js";
-import { getConnectedClient, getConnectedClientByUserId, sendToConnectedClient } from "../ws/connectedClients.js";
+import { getConnectedClient, getConnectedClientByUserId, sendToConnectedClient, sendToConnectedUsers } from "../ws/connectedClients.js";
 import { requestAutohostStart } from "../ws/connectedAutohosts.js";
 import { createEvent } from "../ws/tachyon/messages.js";
 import type { MatchmakingPlaylist } from "../ws/tachyon/matchmaking/playlists.js";
 import type { TachyonAutohostEventDataFor, TachyonEventDataFor, TachyonUserRequestFor } from "../ws/tachyon/types.js";
-import { applyBattleUpdate, createBattle, getBattleForUser, getBattleJoinInfo, listBattles, removeBattle, setBattleConnection, type Battle, type BattleStartScript } from "./store.js";
+import {
+    applyBattleUpdate,
+    createBattle,
+    getBattleForUser,
+    getBattleJoinInfo,
+    listBattles,
+    removeBattle,
+    setBattleConnection,
+    type Battle,
+    type BattleSlotKeys,
+    type BattleStartScript,
+} from "./store.js";
 
 type StartScriptWithoutId = Omit<BattleStartScript, "battleId">;
 type StartScriptTeam = BattleStartScript["allyTeams"][number]["teams"][number];
@@ -38,39 +49,48 @@ function startScriptBot(bot: LobbyBot): StartScriptBot {
     };
 }
 
-export function buildLobbyStartScript(lobby: LobbyState): StartScriptWithoutId {
-    const allyTeams = Object.entries(lobby.allyTeamConfig)
+export function buildLobbyStartScript(lobby: LobbyState): { startScript: StartScriptWithoutId; slotKeys: BattleSlotKeys } {
+    const seated = Object.entries(lobby.allyTeamConfig)
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([allyTeamKey, allyTeam]) => {
             const teams = Object.keys(allyTeam.teams)
                 .sort()
-                .map((teamKey): StartScriptTeam => {
+                .map((teamKey) => {
                     const seatedIn = <T extends { allyTeam: string; team: string; player: string }>(occupants: T[]) =>
                         occupants.filter((occupant) => occupant.allyTeam === allyTeamKey && occupant.team === teamKey).sort((left, right) => left.player.localeCompare(right.player));
-                    const players = seatedIn(Object.values(lobby.players)).map((player) => participant(player.id));
-                    const bots = seatedIn(Object.values(lobby.bots)).map(startScriptBot);
-                    return { ...(players.length > 0 && { players }), ...(bots.length > 0 && { bots }) };
+                    const players = seatedIn(Object.values(lobby.players));
+                    const bots = seatedIn(Object.values(lobby.bots));
+                    const team: StartScriptTeam = {
+                        ...(players.length > 0 && { players: players.map((player) => participant(player.id)) }),
+                        ...(bots.length > 0 && { bots: bots.map(startScriptBot) }),
+                    };
+                    const keys = { team: teamKey, players: players.map((player) => player.player), bots: bots.map((bot) => bot.player) };
+                    return { team, keys };
                 })
-                .filter((team) => team.players || team.bots);
-            return { startBox: allyTeam.startBox, teams };
+                .filter(({ team }) => team.players || team.bots);
+            return { allyTeam: { startBox: allyTeam.startBox, teams: teams.map(({ team }) => team) }, keys: { allyTeam: allyTeamKey, teams: teams.map(({ keys }) => keys) } };
         })
-        .filter((allyTeam) => allyTeam.teams.length > 0);
+        .filter(({ allyTeam }) => allyTeam.teams.length > 0);
+    const allyTeams = seated.map(({ allyTeam }) => allyTeam);
     // Bot hosts are always members, so they are among the players or spectators the autohost requires.
     const spectators = Object.keys(lobby.spectators).sort().map(participant);
     if (allyTeams.length === 0) throw new BattleLaunchError("a battle requires at least one player or bot");
     const restrictions = getRestrictions(lobby.id);
 
     return {
-        engineVersion: lobby.engineVersion,
-        gameName: lobby.gameVersion,
-        mapName: lobby.mapName,
-        gameArchiveHash: DUMMY_GAME_ARCHIVE_HASH,
-        mapArchiveHash: DUMMY_MAP_ARCHIVE_HASH,
-        startPosType: "ingame",
-        allyTeams,
-        spectators,
-        gameOptions: Object.fromEntries(Object.entries(lobby.gameOptions).map(([key, option]) => [key, option.value])),
-        ...(Object.keys(restrictions).length > 0 && { restrictions }),
+        startScript: {
+            engineVersion: lobby.engineVersion,
+            gameName: lobby.gameVersion,
+            mapName: lobby.mapName,
+            gameArchiveHash: DUMMY_GAME_ARCHIVE_HASH,
+            mapArchiveHash: DUMMY_MAP_ARCHIVE_HASH,
+            startPosType: "ingame",
+            allyTeams,
+            spectators,
+            gameOptions: Object.fromEntries(Object.entries(lobby.gameOptions).map(([key, option]) => [key, option.value])),
+            ...(Object.keys(restrictions).length > 0 && { restrictions }),
+        },
+        slotKeys: seated.map(({ keys }) => keys),
     };
 }
 
@@ -102,7 +122,7 @@ export function buildMatchmakingStartScript(members: string[], playlist: Matchma
     };
 }
 
-export async function launchBattle(source: "lobby" | "matchmaking", startScript: StartScriptWithoutId, sourceId: string): Promise<Battle> {
+export async function launchBattle(source: "lobby" | "matchmaking", startScript: StartScriptWithoutId, sourceId: string, slotKeys?: BattleSlotKeys): Promise<Battle> {
     const userIds = [
         ...startScript.allyTeams.flatMap((allyTeam) => allyTeam.teams.flatMap((team) => (team.players ?? []).map((player) => player.userId))),
         ...(startScript.spectators ?? []).map((spectator) => spectator.userId),
@@ -112,7 +132,7 @@ export async function launchBattle(source: "lobby" | "matchmaking", startScript:
         throw new BattleLaunchError("the lobby already has an active battle");
     }
 
-    const battle = createBattle({ source, startScript, ...(source === "lobby" ? { lobbyId: sourceId } : { queueId: sourceId }) });
+    const battle = createBattle({ source, startScript, ...(slotKeys && { slotKeys }), ...(source === "lobby" ? { lobbyId: sourceId } : { queueId: sourceId }) });
     try {
         const response = await requestAutohostStart(battle.startScript);
         if (response.status === "failed") throw new BattleLaunchError(response.details ?? response.reason);
@@ -139,34 +159,46 @@ export function sendBattleStartRequests(battle: Battle): void {
     }
 }
 
+// Winners may be empty (the engine quit or crashed without a game over), and every seat may be a bot.
 function createBattleEndedData(battle: Battle): TachyonEventDataFor<"battle/ended"> {
-    const players = battle.startScript.allyTeams.flatMap((allyTeam, allyTeamIndex) =>
-        allyTeam.teams.flatMap((team, teamIndex) =>
-            (team.players ?? []).map((player, playerIndex) => ({
-                userId: player.userId,
-                name: player.name,
-                allyTeam: String(allyTeamIndex),
-                team: String(teamIndex),
-                player: String(playerIndex),
-            }))
-        )
+    const slots = battle.startScript.allyTeams.flatMap((allyTeam, allyTeamIndex) =>
+        allyTeam.teams.map((team, teamIndex) => {
+            const allyTeamKeys = battle.slotKeys[allyTeamIndex];
+            const teamKeys = allyTeamKeys?.teams[teamIndex];
+            return {
+                team,
+                allyTeam: allyTeamKeys?.allyTeam ?? String(allyTeamIndex),
+                teamKey: teamKeys?.team ?? String(teamIndex),
+                playerKeys: teamKeys?.players ?? [],
+                botKeys: teamKeys?.bots ?? [],
+            };
+        })
     );
-    const bots = battle.startScript.allyTeams.flatMap((allyTeam, allyTeamIndex) =>
-        allyTeam.teams.flatMap((team, teamIndex) =>
-            (team.bots ?? []).map((bot, botIndex) => ({
-                shortName: bot.aiShortName,
-                allyTeam: String(allyTeamIndex),
-                team: String(teamIndex),
-                player: String(botIndex),
-            }))
-        )
+    const players = slots.flatMap(({ team, allyTeam, teamKey, playerKeys }) =>
+        (team.players ?? []).map((player, playerIndex) => ({
+            userId: player.userId,
+            name: player.name,
+            allyTeam,
+            team: teamKey,
+            player: playerKeys[playerIndex] ?? String(playerIndex),
+        }))
     );
+    const bots = slots.flatMap(({ team, allyTeam, teamKey, botKeys }) =>
+        (team.bots ?? []).map((bot, botIndex) => ({
+            shortName: bot.aiShortName,
+            allyTeam,
+            team: teamKey,
+            player: botKeys[botIndex] ?? String(botIndex),
+        }))
+    );
+    // The engine reports winners as start script ally team indices.
+    const winningAllyTeamIds = (battle.winningAllyTeams ?? []).map((index) => battle.slotKeys[index]?.allyTeam ?? String(index));
     return {
         battleId: battle.battleId,
         players,
         bots,
         spectators: (battle.startScript.spectators ?? []).map((spectator) => ({ userId: spectator.userId, name: spectator.name })),
-        winningAllyTeamIds: (battle.winningAllyTeams ?? []).map(String),
+        winningAllyTeamIds: [...new Set(winningAllyTeamIds)],
     };
 }
 
@@ -190,11 +222,11 @@ export function handleBattleUpdate(data: TachyonAutohostEventDataFor<"autohost/u
         updateLobbyBattle(battle, { id: battle.battleId, startedAt: data.time });
     }
     if (!wasEnded && battle.status === "ended") {
-        const event = createEvent("battle/ended", createBattleEndedData(battle));
-        for (const player of battle.players) {
-            const client = getConnectedClientByUserId(player.userId);
-            if (client) sendToConnectedClient(client.username, event);
-        }
+        // Spectators are included, which covers bot-only battles through the bots' hosts.
+        sendToConnectedUsers(
+            battle.players.map((player) => player.userId),
+            createEvent("battle/ended", createBattleEndedData(battle))
+        );
         updateLobbyBattle(battle, undefined);
     }
 }

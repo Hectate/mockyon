@@ -16,7 +16,8 @@ export async function handleLobbyStartBattle(request: TachyonRequestFor<"lobby/s
     }
 
     try {
-        const battle = await launchBattle("lobby", buildLobbyStartScript(lobby), lobbyId);
+        const { startScript, slotKeys } = buildLobbyStartScript(lobby);
+        const battle = await launchBattle("lobby", startScript, lobbyId, slotKeys);
         setImmediate(() => sendBattleStartRequests(battle));
         return {
             type: "response",
