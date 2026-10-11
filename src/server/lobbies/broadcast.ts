@@ -1,10 +1,12 @@
 import { broadcastToConnectedClients, getConnectedClientByUserId, sendToConnectedClient, sendToConnectedUsers } from "../ws/connectedClients.js";
 import { createEvent } from "../ws/tachyon/messages.js";
-import type { TachyonEventDataFor, TachyonEventFor } from "../ws/tachyon/types.js";
+import type { TachyonEventFor } from "../ws/tachyon/types.js";
+import { discardQueuedListPatches, queueListPatch, type LobbyListPatch } from "./listThrottle.js";
+import { listMockOverviews } from "./mock/generator.js";
 import { diffLobby, diffOverview, type LobbyPatch } from "./patch.js";
 import { getLobby, getLobbyIdForUser, getLobbyMemberIds, listOverviews, removeMember, toOverview, type LobbyState, type LobbyVoteOutcome } from "./store.js";
 
-type LobbyListPatch = TachyonEventDataFor<"lobby/listUpdated">["lobbies"];
+export type { LobbyListPatch };
 
 export function snapshotLobby(lobbyId: string): LobbyState | undefined {
     const lobby = getLobby(lobbyId);
@@ -12,15 +14,17 @@ export function snapshotLobby(lobbyId: string): LobbyState | undefined {
 }
 
 export function createLobbyListResetEvent(): TachyonEventFor<"lobby/listReset"> {
-    return createEvent("lobby/listReset", { lobbies: listOverviews() });
+    return createEvent("lobby/listReset", { lobbies: { ...listOverviews(), ...listMockOverviews() } });
 }
 
 export function broadcastLobbyListReset(): void {
+    discardQueuedListPatches();
     broadcastToConnectedClients(createLobbyListResetEvent());
 }
 
-function broadcastListPatch(lobbies: LobbyListPatch): void {
-    broadcastToConnectedClients(createEvent("lobby/listUpdated", { lobbies }));
+// Throttled: the patch is merged into the next `lobby/listUpdated` rather than sent immediately.
+export function broadcastListPatch(lobbies: LobbyListPatch): void {
+    queueListPatch(lobbies);
 }
 
 /**

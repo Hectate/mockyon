@@ -33,6 +33,8 @@ import {
     type LobbyVoteInput,
     type LobbyVoteOutcome,
 } from "../lobbies/store.js";
+import { getListUpdateIntervalSeconds, LIST_UPDATE_INTERVAL_MAX_SECONDS, LIST_UPDATE_INTERVAL_MIN_SECONDS, setListUpdateIntervalSeconds } from "../lobbies/listThrottle.js";
+import { getMockLobbyStatus, MOCK_LOBBY_DEFAULTS, MOCK_LOBBY_MAX_COUNT, MOCK_LOBBY_MAX_RATE, MOCK_LOBBY_MIN_COUNT, startMockLobbies, stopMockLobbies } from "../lobbies/mock/generator.js";
 import { changeVote, finishVote, startVote } from "../lobbies/votes.js";
 
 const VOTE_CHOICES: LobbyVoteChoice[] = ["pending", "yes", "no", "abstain"];
@@ -227,7 +229,18 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     app.get("/api/admin/lobbies", async () => ({
         lobbies: listLobbies().map(describeLobby),
         defaults: getLobbyDefaults(),
+        mock: getMockLobbyStatus(),
+        listUpdateIntervalSeconds: getListUpdateIntervalSeconds(),
     }));
+
+    app.put("/api/admin/lobbies/listUpdateInterval", async (request, reply) => {
+        const seconds = Number((request.body as { seconds?: unknown } | undefined)?.seconds);
+        if (!Number.isFinite(seconds) || seconds < LIST_UPDATE_INTERVAL_MIN_SECONDS || seconds > LIST_UPDATE_INTERVAL_MAX_SECONDS) {
+            return reply.code(400).send({ error: "invalid_interval", min: LIST_UPDATE_INTERVAL_MIN_SECONDS, max: LIST_UPDATE_INTERVAL_MAX_SECONDS });
+        }
+        setListUpdateIntervalSeconds(seconds);
+        return { listUpdateIntervalSeconds: getListUpdateIntervalSeconds() };
+    });
 
     app.put("/api/admin/lobbies/defaults", async (request, reply) => {
         const body = (request.body ?? {}) as Record<string, unknown>;
@@ -248,6 +261,21 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         broadcastLobbyListReset();
         return { success: true };
     });
+
+    app.post("/api/admin/lobbies/mock/start", async (request, reply) => {
+        const body = (request.body ?? {}) as Record<string, unknown>;
+        const count = Number(body.count ?? MOCK_LOBBY_DEFAULTS.count);
+        const ratePerSecond = Number(body.ratePerSecond ?? MOCK_LOBBY_DEFAULTS.ratePerSecond);
+        if (!Number.isInteger(count) || count < MOCK_LOBBY_MIN_COUNT || count > MOCK_LOBBY_MAX_COUNT) {
+            return reply.code(400).send({ error: "invalid_mock_count", min: MOCK_LOBBY_MIN_COUNT, max: MOCK_LOBBY_MAX_COUNT });
+        }
+        if (!Number.isFinite(ratePerSecond) || ratePerSecond <= 0 || ratePerSecond > MOCK_LOBBY_MAX_RATE) {
+            return reply.code(400).send({ error: "invalid_mock_rate", max: MOCK_LOBBY_MAX_RATE });
+        }
+        return { mock: await startMockLobbies({ count, ratePerSecond }) };
+    });
+
+    app.post("/api/admin/lobbies/mock/stop", async () => ({ mock: stopMockLobbies() }));
 
     app.post("/api/admin/lobbies", async (request, reply) => {
         const body = (request.body ?? {}) as Record<string, unknown>;

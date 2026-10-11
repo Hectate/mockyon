@@ -38,6 +38,7 @@ type LobbyBot = {
     version?: string;
 };
 type LobbyDefaults = { mapName: string; gameVersion: string; engineVersion: string };
+type MockLobbyStatus = { running: boolean; count: number; current: number; inBattle: number; ratePerSecond: number };
 type VoteChoice = "pending" | "yes" | "no" | "abstain";
 type VoteOutcome = "passed" | "failed" | "cancelled" | "timeout";
 type VoteActionType = "start" | "changeMap" | "appointBoss" | "kickban";
@@ -150,6 +151,10 @@ const lobbies = ref<Lobby[]>([]);
 const lobbyDefaults = ref<LobbyDefaults>({ mapName: "", gameVersion: "", engineVersion: "" });
 const lobbyStatus = ref("");
 const lobbyError = ref("");
+const mockLobbyStatus = ref<MockLobbyStatus | null>(null);
+const mockLobbyForm = ref({ count: 100, ratePerSecond: 10 });
+const mockLobbyPending = ref(false);
+const listUpdateIntervalSeconds = ref(2);
 const lobbyFormOpen = ref(false);
 const lobbyForm = ref<LobbyForm>(emptyLobbyForm());
 const lobbyDeleteTarget = ref<Lobby | null>(null);
@@ -377,8 +382,15 @@ async function loadLobbies() {
     try {
         const response = await fetch("/api/admin/lobbies");
         if (!response.ok) return;
-        const data = (await response.json()) as { lobbies: Lobby[]; defaults: LobbyDefaults };
+        const data = (await response.json()) as {
+            lobbies: Lobby[];
+            defaults: LobbyDefaults;
+            mock: MockLobbyStatus;
+            listUpdateIntervalSeconds: number;
+        };
         lobbies.value = data.lobbies;
+        mockLobbyStatus.value = data.mock;
+        if (document.activeElement?.id !== "list-update-interval") listUpdateIntervalSeconds.value = data.listUpdateIntervalSeconds;
         syncVoteForms(data.lobbies);
         // Don't overwrite a field the admin is currently typing into.
         if (!document.activeElement?.id?.startsWith("lobby-default-")) lobbyDefaults.value = data.defaults;
@@ -691,6 +703,49 @@ async function resetLobbyList() {
     else lobbyError.value = "Could not reset the lobby list.";
 }
 
+async function saveListUpdateInterval() {
+    lobbyStatus.value = "";
+    lobbyError.value = "";
+    const response = await fetch("/api/admin/lobbies/listUpdateInterval", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seconds: Number(listUpdateIntervalSeconds.value) }),
+    });
+    const data = (await response.json().catch(() => ({}))) as { listUpdateIntervalSeconds?: number; min?: number; max?: number };
+    if (response.ok && data.listUpdateIntervalSeconds !== undefined) {
+        listUpdateIntervalSeconds.value = data.listUpdateIntervalSeconds;
+        lobbyStatus.value = "List update interval saved.";
+    } else {
+        lobbyError.value = `List update interval must be from ${data.min ?? 1} to ${data.max ?? 10} seconds.`;
+    }
+}
+
+async function mockLobbyRequest(action: "start" | "stop") {
+    lobbyStatus.value = "";
+    lobbyError.value = "";
+    mockLobbyPending.value = true;
+    try {
+        const response = await fetch(`/api/admin/lobbies/mock/${action}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(action === "start" ? mockLobbyForm.value : {}),
+        });
+        const data = (await response.json().catch(() => ({}))) as { mock?: MockLobbyStatus; error?: string; min?: number; max?: number };
+        if (response.ok && data.mock) {
+            mockLobbyStatus.value = data.mock;
+            lobbyStatus.value = action === "start" ? "Mock lobbies generating." : "Mock lobbies removed.";
+        } else if (data.error === "invalid_mock_count") {
+            lobbyError.value = `Mock lobby count must be a whole number from ${data.min} to ${data.max}.`;
+        } else if (data.error === "invalid_mock_rate") {
+            lobbyError.value = `Updates per second must be above 0 and at most ${data.max}.`;
+        } else {
+            lobbyError.value = `Could not ${action} mock lobbies.`;
+        }
+    } finally {
+        mockLobbyPending.value = false;
+    }
+}
+
 function refreshAll() {
     refreshCountdown.value = REFRESH_SECONDS;
     void loadStatus().catch(() => (clientError.value = "Unable to load server status."));
@@ -922,6 +977,33 @@ function confirmShutdown() {
                 <button type="button" :disabled="installedEngines.length === 0" @click="openCreateLobby">Create lobby</button>
                 <button type="button" @click="resetLobbyList">Resend lobby list to all clients</button>
             </div>
+            <form class="lobby-actions" @submit.prevent="mockLobbyRequest('start')">
+                <label>
+                    Mock lobbies
+                    <input v-model.number="mockLobbyForm.count" type="number" min="20" step="1" />
+                </label>
+                <label>
+                    Updates/sec
+                    <input v-model.number="mockLobbyForm.ratePerSecond" type="number" min="0.1" step="0.1" />
+                </label>
+                <button type="submit" :disabled="mockLobbyPending">
+                    {{ mockLobbyStatus?.running ? "Apply and regenerate mock lobbies" : "Start mock lobbies" }}
+                </button>
+                <button type="button" :disabled="mockLobbyPending || !mockLobbyStatus?.running" @click="mockLobbyRequest('stop')">
+                    Stop mock lobbies
+                </button>
+                <span v-if="mockLobbyStatus?.running" class="notice">
+                    Running: {{ mockLobbyStatus.current }}/{{ mockLobbyStatus.count }} ({{ mockLobbyStatus.inBattle }} in battle) at
+                    {{ mockLobbyStatus.ratePerSecond }}/s
+                </span>
+            </form>
+            <form class="lobby-actions" @submit.prevent="saveListUpdateInterval">
+                <label>
+                    Send lobby/listUpdated at most every (seconds)
+                    <input id="list-update-interval" v-model.number="listUpdateIntervalSeconds" type="number" min="1" max="10" step="0.5" />
+                </label>
+                <button type="submit">Save interval</button>
+            </form>
             <p v-if="installedEngines.length === 0" class="warning">Install an engine before creating a lobby.</p>
             <p v-if="lobbies.length === 0">No lobbies.</p>
             <div v-for="lobby in lobbies" :key="lobby.id" class="lobby">
