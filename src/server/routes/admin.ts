@@ -8,6 +8,7 @@ import type { TachyonEventDataFor } from "../ws/tachyon/types.js";
 import { isAutohostConnected } from "../ws/connectedAutohosts.js";
 import { config } from "../config.js";
 import { downloadAndExtractEngine, listInstalledEngines } from "../services/engineService.js";
+import { getOfficialMapNames, isOfficialMap } from "../services/mapService.js";
 import { getFoundTimeoutSeconds, setFoundTimeoutSeconds } from "../ws/tachyon/matchmaking/matchmaker.js";
 import { broadcastLobbyChange, broadcastLobbyListReset, sendLobbyLeft, snapshotLobby } from "../lobbies/broadcast.js";
 import { getLobbyDefaults, setLobbyDefaults, type LobbyDefaults } from "../lobbies/defaults.js";
@@ -226,6 +227,8 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         return { engines };
     });
 
+    app.get("/api/admin/maps", async () => ({ maps: await getOfficialMapNames() }));
+
     app.get("/api/admin/lobbies", async () => ({
         lobbies: listLobbies().map(describeLobby),
         defaults: getLobbyDefaults(),
@@ -252,6 +255,9 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         };
         if (!(await isEngineInstalled(next.engineVersion))) {
             return reply.code(400).send({ error: "invalid_engine_version" });
+        }
+        if (!(await isOfficialMap(next.mapName))) {
+            return reply.code(400).send({ error: "invalid_map_name" });
         }
         setLobbyDefaults(next);
         return { defaults: getLobbyDefaults() };
@@ -293,6 +299,9 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         if (!(await isEngineInstalled(input.engineVersion))) {
             return reply.code(400).send({ error: "invalid_engine_version" });
         }
+        if (!(await isOfficialMap(input.mapName))) {
+            return reply.code(400).send({ error: "invalid_map_name" });
+        }
 
         const lobby = createLobby(input);
         broadcastLobbyChange(undefined, lobby);
@@ -319,6 +328,10 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         }
         if (changes.engineVersion !== undefined && !(await isEngineInstalled(changes.engineVersion))) {
             return reply.code(400).send({ error: "invalid_engine_version" });
+        }
+        // A client may have set an unofficial map; only a change made here has to be official.
+        if (changes.mapName !== undefined && changes.mapName !== getLobby(id)?.mapName && !(await isOfficialMap(changes.mapName))) {
+            return reply.code(400).send({ error: "invalid_map_name" });
         }
 
         const before = snapshotLobby(id);

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { config } from "../../config.js";
 import { listInstalledEngines } from "../../services/engineService.js";
+import { getMapNames } from "../../services/mapService.js";
 import { broadcastListPatch, broadcastLobbyListReset, type LobbyListPatch } from "../broadcast.js";
 import { getLobbyDefaults } from "../defaults.js";
 import { diffOverview } from "../patch.js";
@@ -37,19 +38,6 @@ const BATTLE_MIN_DURATION_MS = 5 * 60 * 1000;
 const SAMPLE_TRIES = 20;
 
 const MAX_PLAYER_COUNTS = [2, 4, 6, 8, 10, 12, 16, 32];
-const MAP_NAMES = [
-    "All That Glitters v2.2",
-    "Supreme Isthmus v1.8",
-    "Comet Catcher Remake 1.8",
-    "Throne v8",
-    "Red Comet Remake 1.8",
-    "Isidis Crack 1.1",
-    "Altair Crossing v4.1",
-    "Eye of Horus v1.7",
-    "Tempest V3",
-    "Hellas Basin v1.4",
-    "Quicksilver Remake 1.24",
-];
 
 type Operation = "add" | "remove" | "endBattle" | "modify";
 type MockProperty = "playerCount" | "mapName" | "name" | "maxPlayerCount" | "gameVersion" | "engineVersion";
@@ -168,9 +156,10 @@ function syntheticGameVersions(defaultGame: string, count: number): string[] {
 
 async function buildValuePools(): Promise<ValuePools> {
     const defaults = getLobbyDefaults();
+    const mapNames = await getMapNames();
     const installed = (await listInstalledEngines(config.enginesDir).catch(() => [])).map((engine) => engine.version);
     return {
-        maps: dedupe([defaults.mapName, ...MAP_NAMES]),
+        maps: dedupe([defaults.mapName, ...mapNames]),
         engines: dedupe([defaults.engineVersion, ...installed, ...syntheticEngineVersions(3)]),
         games: dedupe([defaults.gameVersion, ...syntheticGameVersions(defaults.gameVersion, 4)]),
     };

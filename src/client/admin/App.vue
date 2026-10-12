@@ -139,6 +139,8 @@ const autohost = ref<AutohostStatus>({ status: "stopped", connected: false });
 const autohostError = ref("");
 const autohostActionPending = ref(false);
 const engines = ref<Engine[]>([]);
+// Official map names; empty when the server could not fetch them, which leaves the map fields free text.
+const officialMaps = ref<string[]>([]);
 const engineVersion = ref("");
 const engineDownloadStatus = ref("");
 const engineDownloadError = ref("");
@@ -378,6 +380,15 @@ async function loadInstalledEngines() {
     }
 }
 
+async function loadOfficialMaps() {
+    try {
+        const response = await fetch("/api/admin/maps");
+        if (response.ok) officialMaps.value = ((await response.json()) as { maps: string[] }).maps;
+    } catch {
+        /* ignore */
+    }
+}
+
 async function loadLobbies() {
     try {
         const response = await fetch("/api/admin/lobbies");
@@ -599,7 +610,11 @@ async function saveLobbyDefaults() {
         body: JSON.stringify(lobbyDefaults.value),
     });
     if (response.ok) lobbyStatus.value = "Lobby defaults saved.";
-    else lobbyError.value = "Lobby defaults rejected (is the engine installed?).";
+    else {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        lobbyError.value =
+            data.error === "invalid_map_name" ? "That map is not an official map." : "Lobby defaults rejected (is the engine installed?).";
+    }
 }
 
 function openCreateLobby() {
@@ -659,7 +674,11 @@ async function submitLobbyForm() {
     if (!response.ok) {
         const data = (await response.json().catch(() => ({}))) as { error?: string };
         lobbyError.value =
-            data.error === "invalid_engine_version" ? "That engine version is not installed." : "Lobby configuration rejected.";
+            data.error === "invalid_engine_version"
+                ? "That engine version is not installed."
+                : data.error === "invalid_map_name"
+                  ? "That map is not an official map."
+                  : "Lobby configuration rejected.";
         return;
     }
     lobbyFormOpen.value = false;
@@ -760,6 +779,8 @@ onMounted(async () => {
         await loadStatus();
         await loadInstalledEngines();
         await loadLobbies();
+        // The map list is fixed for the server's lifetime, so it is not part of the refresh cycle.
+        void loadOfficialMaps();
         refreshCountdown.value = REFRESH_SECONDS;
         statusTimer = setInterval(refreshAll, REFRESH_SECONDS * 1000);
         countdownTimer = setInterval(() => {
@@ -954,10 +975,13 @@ function confirmShutdown() {
 
         <section>
             <h2>Lobbies</h2>
+            <datalist id="official-maps">
+                <option v-for="map in officialMaps" :key="map" :value="map" />
+            </datalist>
             <form class="download-form" @submit.prevent="saveLobbyDefaults">
                 <label>
                     Default map
-                    <input id="lobby-default-map" v-model="lobbyDefaults.mapName" type="text" />
+                    <input id="lobby-default-map" v-model="lobbyDefaults.mapName" type="text" list="official-maps" />
                 </label>
                 <label>
                     Default game
@@ -1339,7 +1363,7 @@ function confirmShutdown() {
                     </label>
                     <label>
                         Map
-                        <input v-model="lobbyForm.mapName" type="text" required />
+                        <input v-model="lobbyForm.mapName" type="text" list="official-maps" required />
                     </label>
                     <label>
                         Game

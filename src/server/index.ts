@@ -1,7 +1,9 @@
 import { buildApp } from "./app.js";
 import { config } from "./config.js";
+import { loadMapNames } from "./services/mapService.js";
 
 const app = await buildApp();
+loadMapNames(config.mapsMetadataUrl, app.log);
 
 try {
     await app.listen({ host: config.host, port: config.port });

@@ -38,6 +38,8 @@ export const config = {
     repoRoot: path.resolve(here, "../.."),
     // Engine release API endpoint (mirrors bar-lobby's engineReleaseUrl)
     engineReleaseUrl: process.env.ENGINE_RELEASE_URL ?? "https://files-cdn.beyondallreason.dev/find",
+    // Map metadata, the same source bar-lobby reads its map list from
+    mapsMetadataUrl: process.env.MAPS_METADATA_URL ?? "https://maps-metadata.beyondallreason.dev/latest/lobby_maps.validated.json",
     // Engines directory (relative to repo root)
     enginesDir: path.resolve(here, "../../engines"),
     // Per-battle autohost instance directories, kept alongside the engines directory
